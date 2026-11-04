@@ -108,14 +108,17 @@ build for the full set. Do not run model tests on GPUs occupied by another produ
 
 Observed synthetic workload, one run per case, 62074 input tokens, temperature 0, top-k 1, seed 42, thinking off:
 
-| Case | Reused tokens | Wall time |
+| Case | Reused tokens | Prefill time |
 | --- | ---: | ---: |
-| Original engine, cold | 0 | 37.59 s |
-| Modified engine, feature disabled, cold | 0 | 36.58 s |
-| Disk enabled, cold | 0 | 37.62 s |
-| Long A → short request → A | 62067 | 3.49 s |
-| Long A → long B → A | 62067 | 4.48 s |
-| Corrupted second-stage file → A recomputed | 0 | 38.58 s |
+| Original engine, cold | 0 | 36.19 s |
+| Modified engine, feature disabled, cold | 0 | 36.04 s |
+| Disk enabled, cold | 0 | 36.55 s |
+| Long A → short request → A | 62067 | 2.53 s |
+| Long A → long B → A | 62067 | 4.15 s |
+| Corrupted second-stage file → A recomputed | 0 | 37.69 s |
+
+Times are the engine-reported `timings.prompt_ms` divided by 1000. They include input processing such as
+cache parking/restoration and exclude answer generation (decode).
 
 Every A answer matched the original engine. The A snapshot was 1006707056 bytes across two files; parking took
 1.37–1.75 s. Normal exit removed the files. The corruption case rejected a payload checksum mismatch before restoring
