@@ -1,211 +1,77 @@
-# Strata — disposable disk KV cache fork
+# Strata CacheKV
 
-This is a source fork of [Niko1221/Strata](https://github.com/Niko1221/Strata), based on **v0.2.10**
-(commit `ffa80d73133ea5c548aefe57889a16e8085a938f`). It adds an **optional, temporary disk conversation cache**
-for long conversations that take turns on the same engine, including layer-split CUDA serving with MTP.
+**複数エージェントが交代で使う長い会話をSSDへ退避し、Prefillの待ち時間を短縮するStrataのForkです。**
 
-**The feature is off by default.** Build this checkout to use it; the upstream installers and release binaries
-linked below do not contain this fork's changes. No fork binaries or automatic update feed are provided.
-See [build, enable/disable and validation instructions](docs/DISK_KV_CACHE_FORK.md)
-or [日本語](docs/DISK_KV_CACHE_FORK.ja.md).
+[使い方](docs/DISK_KV_CACHE_FORK.ja.md) · [English guide](docs/DISK_KV_CACHE_FORK.md) · [上流のStrata](https://github.com/Niko1221/Strata)
 
-The upstream project and its MIT license are preserved. This fork is maintained separately; support requests for
-this feature should be directed to this fork. The original upstream README follows.
+Strataでメインエージェントとサブエージェントを交代で動かすと、以前の長い会話へ戻るたびに入力を再計算し、Prefillが待ち時間のボトルネックになることがあります。
 
----
+このForkでは、**60,000トークンを超えた会話のKVキャッシュと、復帰に必要な実行状態をSSDへ一時保存**します。同じ入力や保存済みの会話と先頭部分が一致する入力が来たときに復元し、一致する部分のPrefillを再利用します。
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="apps/host/public/brand/strata-lockup-dark.svg">
-    <img src="apps/host/public/brand/strata-lockup-light.svg" alt="Strata" width="340">
-  </picture>
-</p>
+## 実測ベンチマーク
 
-<h3 align="center">Run powerful AI on your own computer.</h3>
-<p align="center">Chat, code and work with images, locally.</p>
+62,074トークンの合成入力で、**初回約37.6秒 → 会話の復元後は約3.5〜4.5秒**になりました。
 
-<p align="center">
-  <a href="#models">Models</a> · <a href="#install"><b>Install</b></a> ·
-  <a href="#hardware">Hardware</a> · <a href="#tools">Tools</a> ·
-  <a href="#help">Help</a> · <a href="#support-strata">Support</a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/Niko1221/Strata/releases/latest"><img src="https://img.shields.io/github/v/release/Niko1221/Strata?label=download&color=0ab887" alt="Download Strata"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/Niko1221/Strata" alt="MIT license"></a>
-  <a href="https://buymeacoffee.com/strataengine"><img src="https://img.shields.io/badge/Buy_me_a_coffee-FFDD00?logo=buymeacoffee&logoColor=000" alt="Support Strata on Buy Me a Coffee"></a>
-</p>
-
-<p align="center"><sub><b>English</b> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.de.md">Deutsch</a> · <a href="README.fr.md">Français</a> · <a href="README.es.md">Español</a> · <a href="README.pt-BR.md">Português</a> · <a href="README.pl.md">Polski</a></sub></p>
-
-**Free, open source, and yours to run.** Use Strata on your desktop or with your favorite coding tools. No account needed.
-
-## Models
-
-We recommend **ISTA-DASLab first**, then **Unsloth** and other providers, where a compatible model fits.
-
-<details>
-<summary><img src="docs/media/models/qwen.svg" width="22" alt="" align="middle"> &nbsp;<b>Qwen3.8-Flash-Next</b></summary>
-
-| Provider | Choices |
-| --- | --- |
-| **ISTA-DASLab · recommended** | Q2\_0, IQ2\_XS, IQ3\_XXS, IQ3\_S. [Coder: IQ1\_M](docs/MODELS.md#coder) for coding. |
-| **Unsloth** | UD-IQ4\_XS, UD-Q4\_K\_XL, UD-Q5\_K\_XL, UD-Q6\_K\_XL, Q8\_0 |
-| **Gyro · agentionai** | [Gyro-S, Gyro-M](https://huggingface.co/agentionai/Qwen3.8-Flash-Next-Gyro-GGUF). Lower memory use but slower. |
-| **Other options** | [Swift 1.5](docs/MODELS.md#swift-15), [NVFP4](docs/NVFP4.md), [OrcaRouter](docs/ORCA.md) |
-
-[Compare sizes, memory needs and compatibility](docs/MODELS.md).
-
-</details>
-
-<details>
-<summary><img src="docs/media/models/qwen.svg" width="22" alt="" align="middle"> &nbsp;<b>Qwen3.6-35B-A3B</b></summary>
-
-**Unsloth:** UD-Q4_K_XL, UD-Q6_K_XL, Q8_0. These are the currently documented packs for this model.
-
-[Model guide and compatibility](docs/QWEN36.md).
-
-</details>
-
-<details>
-<summary><img src="docs/media/models/deepseek.svg" width="22" alt="" align="middle"> &nbsp;<b>DeepSeekV4.1-Flash-1017</b></summary>
-
-In the **desktop app** and the **Terminal**. What does not fit in memory is read from your SSD, so it needs a lot of free
-disk space.
-
-| Set (ISTA-DAS) | Download | Free disk needed |
+| ケース | 再利用したトークン | 応答完了までの時間 |
 | --- | ---: | ---: |
-| 1.75 bpw | 239 GB | about 245 GB |
-| 2.00 bpw | 257 GB | about 265 GB |
-| 2.25 bpw | 274 GB | about 280 GB |
-| ISTA-DAS Coder (half of the experts removed) | 191 GB | about 197 GB |
+| 変更前のStrata：初回入力 | 0 | 37.59秒 |
+| このFork：機能オフで初回入力 | 0 | 36.58秒 |
+| このFork：機能オンで初回入力 | 0 | 37.62秒 |
+| 長い会話A → 短い別会話 → Aへ復帰 | 62,067 | **3.49秒** |
+| 長い会話A → 長い会話B → Aへ復帰 | 62,067 | **4.48秒** |
 
-Runs on NVIDIA RTX 30, 40 and 50 series (Windows and Linux), AMD Radeon AI PRO R9700 (Linux), AMD Ryzen AI Max — Strix Halo
-(Windows), and Apple Silicon Macs with 64 GB or more, text only ([Mac](docs/DEEPSEEK_MAC.md)). Setup downloads the files and the DeepSeek engine, then starts the model.
+**Aの回答は、すべて変更前のStrataと一致しました。** 保存ファイルを意図的に壊した試験でも、破損を検出して再計算へ戻り、同じ回答を返すことを確認しています。
 
-```sh
-strata launch --family deepseek41 --model ist-das-2.00bpw --plan
-```
+<details>
+<summary>測定条件・検証範囲</summary>
 
-Measured with the 2.00 bpw set on Strata 0.2.5 (Strix Halo: 0.2.7). Output is the speed of the answer, prompt is how fast Strata reads your input.
+- GPU：V100 × 2、各150 W固定
+- 実行環境：Linux、CUDA 12.9 / sm_70
+- モデル：Qwen3.8-Flash-Next IQ3_S
+- 設定：KV `k8v4`、MTP、262,144コンテキスト、並列1、layer split 24
+- 測定：各ケース1回。生成はtemperature 0、top-k 1、seed 42、Thinkingオフ
+- 保存先：通常のNVMe SSD。Optane Memoryでの実測は未実施
 
-| Hardware | Output | Prompt |
-| --- | ---: | ---: |
-| RTX 5070 12 GB, 64 GB RAM | 4 to 6 tokens/s | about 110 tokens/s (4K) |
-| RTX 3060 12 GB, 46 GB RAM | 9 to 11 tokens/s | about 155 tokens/s (4K) |
-| 1x Radeon AI PRO R9700, 251 GB RAM | 21 to 25 tokens/s | 320 to 360 tokens/s (8K) |
-| 4x Radeon AI PRO R9700 | 74 to 77 tokens/s | 400 to 450 tokens/s (8K) |
-| Ryzen AI Max+ 395 (Strix Halo), 128 GB unified | 19 to 21 tokens/s (code), 11 (chat) | 87 tokens/s (4K), 125 tokens/s (8K) |
+表はPrefillだけではなく、復元や回答生成を含むリクエスト全体の時間です。測定前に冷却し、OSページキャッシュは消去していません。他のモデル・ストレージ・会話構成で同じ短縮率を保証するものではありません。
 
-[Memory, disk and details](docs/DEEPSEEK41.md) · [Release notes](https://github.com/Niko1221/Strata/releases)
+C++テスト9件と既存APIテスト359件が通過しています。詳しい測定条件と未実施の検証は[検証記録](docs/DISK_KV_CACHE_FORK.md#validation-actually-performed)をご覧ください。
 
 </details>
 
-<a id="the-other-sizes"></a>
+## サブエージェントを使う場面に
 
-Not sure what fits? [Choose a model for your computer](docs/MODELS.md#pick-by-memory).
+DeepSeek Harnessなどで、**メインエージェントとサブエージェントが同じStrataサーバーを交代で利用する構成**を想定しています。サブエージェントの処理後に長いメイン会話へ戻る際、保存済みの入力と一致する部分を復元できれば、Prefillの再計算を減らせます。
 
-## Install
+Harnessそのものとの結合試験は未実施です。今回確認したのは、長い会話A・別会話・Aへの復帰という交代パターンです。
 
-<a id="option-a-the-strata-app"></a>
+## 保存先についての重要な注意
 
-### Desktop app
+**Optane Memory、または消耗・故障を許容できるキャッシュ専用SSDでの使用を強く推奨します。**
 
-**[Download Strata for Windows, Linux or Mac →](https://github.com/Niko1221/Strata/releases/latest)**
+この機能は、会話の切り替え時に大きな状態をディスクへ書き込みます。今回の約62kトークンの会話では、1回の退避で**約1.0 GB**を書き込みました。切り替えを繰り返すと、累積の書き込み量も大きくなります。
 
-Install the app, choose a model, and start chatting. There is one installer for each system. On first start the app
-downloads the engine for your graphics card. [Help with the installer](docs/INSTALL.md#the-app).
+- 大切なデータやOSを保存しているSSDと分け、キャッシュ専用の保存先を用意してください。
+- **保存容量の上限12 GiBは、累積書き込み量の上限ではありません。**
+- Optane Memory実機での性能・耐久性の検証は、まだ行っていません。
 
-<sub>Files: `Strata-0.2.9-windows-x64-setup.exe` · `Strata-0.2.9-linux-x86_64.AppImage` · `Strata-0.2.9-macos-arm64.dmg`</sub>
+## 使い方と初期設定
 
-<p align="center">
-  <img src="docs/media/app-chat.png" width="900" alt="Strata desktop app with a chat and live code preview side by side">
-  <br><sub>Chat, files and a live preview in one window.</sub>
-</p>
+**機能は初期状態でオフです。** このForkをソースからビルドし、保存先を指定して有効化してください。上流のインストーラーや配布バイナリには、この追加機能は含まれません。
 
-<a id="option-b-the-terminal-one-line"></a>
-
-### Terminal app
-
-Prefer the terminal? Install Strata, then run **`strata launch`**.
-
-<details open>
-<summary><b>Install commands</b></summary>
-
-**Linux / Mac**
-
-```sh
-curl -fsSL https://github.com/Niko1221/Strata/releases/latest/download/install.sh -o install.sh && sh install.sh
-```
-
-**Windows PowerShell**
-
-```powershell
-irm https://github.com/Niko1221/Strata/releases/latest/download/install.ps1 | iex
-```
-
-On Windows, open a new terminal afterwards. Then:
-
-```sh
-strata launch
-```
-
-Follow the prompts to download and start a model. [Terminal guide](docs/TERMINAL_LAUNCH.md).
-
-</details>
-
-<p align="center">
-  <img src="docs/media/terminal-monitor.png" width="900" alt="Strata terminal app showing model activity, speed, memory and recent requests">
-  <br><sub>Watch your model and hardware while it runs.</sub>
-</p>
-
-<a id="build-from-source"></a>
-
-[Build from source](docs/SOURCE_INSTALL.md) · [Docker](docs/DOCKER.md) · [Full install guide](docs/INSTALL.md)
-
-<a id="what-you-need"></a>
-
-## Hardware
-
-| Supported hardware | Guide |
+| 項目 | 初期値・対応範囲 |
 | --- | --- |
-| **NVIDIA GeForce RTX 20 / 30 / 40 / 50 series** | [NVIDIA setup](docs/INSTALL.md#what-you-need) |
-| **AMD Radeon RX 7700 / 7800 / 7900, RX 9060 / 9070, AI PRO R9700** | [AMD setup](docs/AMD_HIP.md) |
-| **AMD Radeon RX 6800 / 6900 · experimental** | [RX 6000 setup](docs/AMD_HIP.md#rdna2-gfx1030) |
-| **Intel Arc · Linux** | [Intel setup](docs/INTEL_ARC.md) |
-| **Apple Silicon · M1 or newer** | [Mac setup](docs/MAC.md) |
-| **AMD Ryzen AI Max · Strix Halo** | [Strix Halo setup](docs/STRIX_HALO.md) |
-| **NVIDIA DGX Spark · Linux** | [DGX Spark setup](docs/DGX_SPARK_LINUX.md) |
+| 保存対象 | 60,001トークン以上の会話状態。生成済みのトークンも含む |
+| ディスク容量 | 合計12 GiB。足りなくなったら最後の利用時刻が古いものから削除 |
+| 保存期間 | 一時保存。終了・次回起動時に破棄 |
+| 対応 | Linuxでの逐次処理、layer split、MTP |
+| 対象外 | `--batch`、`--peer-device` |
 
-<a id="using-it"></a>
+復元ではトークン列・画像情報・実行設定を検証します。KV全体をRAMへ複製せず、小分けに読み書きし、既存のRAM保護も維持します。
 
-## Tools
+[ビルド・有効化・無効化の手順はこちら](docs/DISK_KV_CACHE_FORK.ja.md)。CUDA以外のバックエンドは、このForkでは未検証です。
 
-**Claude Code · Codex CLI · OpenCode · oh-my-pi · pi.dev · Hermes Agent · OpenClaw**, and more through the OpenAI- and Anthropic-compatible APIs.
+## このForkについて
 
-Run **`strata connect`** to see setup instructions for your tool. [Connection guide](docs/TERMINAL_LAUNCH.md#connect-your-apps-strata-connect).
+[Niko1221/Strata](https://github.com/Niko1221/Strata) **v0.2.10 / engine 0.1.56**を元にした、ソース配布のForkです。上流の著作権表示と[MITライセンス](LICENSE)を維持しています。
 
-<a id="guides"></a>
-<a id="how-fast-is-it"></a>
-<a id="how-does-it-work"></a>
-<a id="something-went-wrong"></a>
-
-## Help
-
-[All guides](docs) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Report a bug](https://github.com/Niko1221/Strata/issues/new/choose) ·
-[Benchmarks](docs/COMMUNITY_BENCHMARKS.md) · [How it works](docs/HOW_IT_WORKS.md) · [Contribute](CONTRIBUTING.md)
-
-## Support Strata
-
-**Help keep local AI open to everyone.** A coffee helps fund development and testing on more hardware.
-
-<a href="https://buymeacoffee.com/strataengine"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee: support Strata" height="48"></a>
-
-[MIT license](LICENSE) · [Credits and model licenses](docs/HOW_IT_WORKS.md#credits) · [Privacy](docs/SAFETY.md)
-
-<a id="option-c-let-your-ai-set-it-up"></a>
-
-<sub>For AI tools and automated readers: <a href="AGENTS.md">technical reference</a> · <a href="docs/AI_SETUP.md">setup instructions</a>.</sub>
-
-**Sponsorships, hardware partnerships or collaborations:** [niko.veit@outlook.com](mailto:niko.veit@outlook.com).
-
+Strata本体の概要や通常の導入方法は[上流のREADME](https://github.com/Niko1221/Strata/tree/v0.2.10#readme)をご覧ください。このForkの追加機能についての問い合わせは、このForkへお願いします。
