@@ -1,0 +1,42 @@
+name: Disk conversation cache CPU tests
+
+on:
+  push:
+    branches: [disk-conversation-cache]
+    paths:
+      - 'include/strata/core/conversation*'
+      - 'src/core/conversation*'
+      - 'src/core/session_save_reclaim*'
+      - '.github/workflows/disk-conversation-cache.yml'
+  pull_request:
+    paths:
+      - 'include/strata/core/conversation*'
+      - 'src/core/conversation*'
+      - 'src/core/session_save_reclaim*'
+      - '.github/workflows/disk-conversation-cache.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run without CUDA or model downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          for name in conversation_cache_test conversation_split_failure_test conversation_disk_test; do
+            g++ -std=c++20 -O1 -I include "src/core/$name.cpp" -o "$scratch/$name"
+            "$scratch/$name"
+          done
+          g++ -std=c++20 -O1 -I include src/core/conversation_memory_test.cpp src/core/conversation_memory.cpp -o "$scratch/memory"
+          "$scratch/memory"
+          for name in conversation_file_test session_save_reclaim_test; do
+            g++ -std=c++20 -O1 -I include "src/core/$name.cpp" src/core/conversation_file.cpp -o "$scratch/$name"
+            "$scratch/$name"
+          done

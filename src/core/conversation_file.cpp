@@ -410,6 +410,7 @@ public:
         while (n) {
             const ssize_t r = ::pread(fd_, p, n, (off_t) offset);
             if (r < 0 && errno == EINTR) continue;
+            if (r < 0 && errno == EINVAL && direct_ && leave_direct()) continue;
             if (r <= 0) { kind_ = r < 0 ? errno_kind(errno) : SessionError::io; error_ = r < 0 ? std::strerror(errno) : "file ends early"; return false; }
             p += r; n -= (size_t) r; offset += (uint64_t) r;
         }
@@ -646,7 +647,7 @@ struct Out {
     template<class T> void vec(const std::vector<T>& v) { u64(v.size()); raw(v.data(), v.size() * sizeof(T)); }
     void buffer(const ConversationBuffer& b) {
         u64(b.size());
-        b.visit(0, b.size(), [&](const uint8_t* p, size_t c, size_t) { raw(p, c); return ok; });
+        if (!b.visit(0, b.size(), [&](const uint8_t* p, size_t c, size_t) { raw(p, c); return ok; })) ok = false;
     }
     // a K/V part pulled from its owner straight into the file block (sizing pass: counted, never read)
     void source(const SessionKvSource& s, size_t part) {
@@ -716,6 +717,17 @@ struct In {
     const SessionReadLimits& limits;
     SessionError kind = SessionError::invalid;
     size_t kv_layer = 0;
+    std::shared_ptr<RawFile> backing;
+    uint64_t payload_size = 0;
+    bool admit_array(uint64_t bytes) {
+        if (!limits.stream_kv || !limits.admit) return true;
+        std::string why;
+        constexpr uint64_t overhead = 2 * kBlock + (1 << 20);
+        if (bytes > UINT64_MAX - overhead) return fail("streamed allocation size overflow");
+        if (limits.admit(bytes + overhead, why)) return true;
+        kind = SessionError::memory;
+        return fail(why);
+    }
     bool fail(const std::string& m) { if (error.empty()) error = "session file: " + m; return false; }
     bool raw(void* p, size_t c) {
         if (c > left) return fail("payload ends early");
@@ -738,6 +750,7 @@ struct In {
     template<class T> bool vec(std::vector<T>& v, uint64_t limit = UINT64_MAX) {
         uint64_t n = 0;
         if (!count(n, sizeof(T), limit)) return false;
+        if (!admit_array(n * sizeof(T))) return false;
         v.resize((size_t) n);
         return raw(v.data(), (size_t) n * sizeof(T));
     }
@@ -746,6 +759,19 @@ struct In {
         const uint64_t limit = kv_layer < limits.max_kv_bytes.size() ? limits.max_kv_bytes[kv_layer][part] : UINT64_MAX;
         if (!count(n, 1, limit)) return false;
         b = {};
+        if (limits.stream_kv) {
+            const uint64_t offset = kHeader + payload_size - left;
+            std::vector<uint8_t> block(std::min<uint64_t>(n, kBlock));
+            for (uint64_t at = 0; at < n;) {
+                const size_t c = (size_t) std::min<uint64_t>(n - at, kBlock);
+                if (!raw(block.data(), c)) return false;
+                at += c;
+            }
+            b.file_backed((size_t) n, [file = backing, offset](size_t at, void* p, size_t c) {
+                return file->read_at(offset + at, static_cast<uint8_t*>(p), c);
+            });
+            return true;
+        }
         b.resize((size_t) n);
         return b.visit(0, b.size(), [&](uint8_t* p, size_t c, size_t) { return raw(p, c); });
     }
@@ -1176,7 +1202,8 @@ bool read_impl(const std::string& path, const SessionFileIdentity& id, SavedConv
     error.clear();
     st = {};
     st.error = SessionError::invalid;   // every refusal below, unless the step says otherwise
-    RawFile raw;
+    auto backing = std::make_shared<RawFile>();
+    RawFile& raw = *backing;
     uint64_t size = 0;
     if (!raw.open_session(path, size)) {
         st.error = raw.refused() ? SessionError::invalid : raw.kind();
@@ -1215,7 +1242,7 @@ bool read_impl(const std::string& path, const SessionFileIdentity& id, SavedConv
     }
     if (limits.admit) {
         std::string why;
-        if (!limits.admit(session_read_peak_bytes(size), why)) {
+        if (!limits.admit(limits.stream_kv ? 2 * kBlock + (1 << 20) : session_read_peak_bytes(size), why)) {
             st.error = SessionError::memory;
             error = "session file: " + why;
             return false;
@@ -1223,6 +1250,7 @@ bool read_impl(const std::string& path, const SessionFileIdentity& id, SavedConv
     }
     SavedConversation parsed;
     In in{&f, SessionHasher(0), payload, error, limits};
+    in.backing = backing; in.payload_size = payload;
     if (!get_payload(in, parsed)) { st.error = in.kind; return false; }
     if (in.left) { error = "session file: payload has " + std::to_string(in.left) + " unparsed bytes"; return false; }
     uint8_t t[kTrailer];

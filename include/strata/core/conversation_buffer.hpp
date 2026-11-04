@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <functional>
+#include <stdexcept>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -30,14 +32,21 @@ public:
     ConversationBuffer(const ConversationBuffer&) = default;
     ConversationBuffer& operator=(const ConversationBuffer&) = default;
     ConversationBuffer(ConversationBuffer&& other) noexcept
-        : segments_(std::move(other.segments_)), size_(std::exchange(other.size_, 0)) {}
+        : segments_(std::move(other.segments_)), reader_(std::move(other.reader_)), size_(std::exchange(other.size_, 0)) {}
     ConversationBuffer& operator=(ConversationBuffer&& other) noexcept {
         if (this == &other) return *this;
         segments_ = std::move(other.segments_);
+        reader_ = std::move(other.reader_);
         size_ = std::exchange(other.size_, 0);
         return *this;
     }
 
+    // Immutable, bounded-read backing for a validated temporary session file.
+    // The callback owns its open file handle, so rename/unlink cannot change its identity.
+    void file_backed(size_t n, std::function<bool(size_t, void*, size_t)> reader) {
+        segments_.clear(); reader_ = std::move(reader); size_ = n;
+    }
+    bool is_file_backed() const { return bool(reader_); }
     size_t size() const { return size_; }
     bool empty() const { return size_ == 0; }
     size_t bytes() const {
@@ -64,6 +73,7 @@ public:
     }
     void resize(size_t n, uint8_t value = 0) { resize_impl(n, &value); }
     void resize_impl(size_t n, const uint8_t* value) {
+        if (reader_) throw std::logic_error("cannot resize an immutable disk conversation buffer");
         if (n > size_) {
             const size_t held = size_;
             const bool growing = held != 0;
@@ -116,6 +126,15 @@ public:
     }
     bool operator==(const ConversationBuffer& other) const {
         if (size_ != other.size_) return false;
+        if (reader_ || other.reader_) {
+            bool equal = true;
+            const bool visited = visit(0, size_, [&](const uint8_t* p, size_t n, size_t at) {
+                std::vector<uint8_t> rhs(n);
+                equal = other.read(rhs.data(), at, n) && !std::memcmp(p, rhs.data(), n);
+                return equal;
+            });
+            return visited && equal;
+        }
         size_t a = 0, b = 0, x = 0, y = 0;
         while (a < segments_.size() && b < other.segments_.size()) {
             const auto& left = segments_[a];
@@ -158,6 +177,16 @@ private:
     }
     template<class Self, class Fn> static bool visit_impl(Self& self, size_t offset, size_t count, Fn fn) {
         if (offset > self.size_ || count > self.size_ - offset) return false;
+        if (self.reader_) {
+            std::vector<uint8_t> block(std::min(count, segment_bytes));
+            while (count) {
+                const size_t n = std::min(count, segment_bytes);
+                if (!self.reader_(offset, block.data(), n) || !fn(block.data(), n, offset)) return false;
+                offset += n; count -= n;
+                progress_beat();
+            }
+            return true;
+        }
         size_t begin = 0;
         for (auto& segment : self.segments_) {
             if (!count) break;
@@ -172,6 +201,7 @@ private:
         return count == 0;
     }
     std::vector<Segment> segments_;
+    std::function<bool(size_t, void*, size_t)> reader_;
     size_t size_ = 0;
 };
 

@@ -206,6 +206,7 @@ bool session_save_checkpoints(const std::vector<ConversationCheckpoint>& chain, 
 // these limits BEFORE its array is allocated; the defaults accept whatever the payload can hold.  The engine sets all
 // of them from its runtime (conversation_session_read_limits), and then the file size is bounded too.
 struct SessionReadLimits {
+    bool stream_kv = false; // keep K/V in its open file; hash it in bounded blocks before exposing it
     uint64_t max_file_bytes = UINT64_MAX;
     uint64_t max_tokens = UINT64_MAX;       // token and image counts of the live state and of each checkpoint
     uint64_t max_checkpoints = UINT64_MAX;

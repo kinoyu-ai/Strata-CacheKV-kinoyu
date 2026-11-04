@@ -771,6 +771,28 @@ stage. Parked snapshots are not kept across restarts; session files are. `STRATA
 retention for diagnostics. The Monitor tab's **Conversation cache** card shows parked, restored and evicted counts and the
 prompt tokens the cache gave back; `/metrics` has the same under `"conversation_cache"`.
 
+### Disposable disk conversation cache (Linux, opt-in)
+
+`--conversation-cache-dir DIR` parks long outgoing conversations on disk before another conversation overwrites their
+state. `--conversation-cache-disk-mib N` bounds the total files (default 12288 MiB); `--conversation-cache-disk-min-tokens N`
+sets the minimum captured length (default 60001 tokens). Older last-used entries are evicted first. Set
+`--conversation-cache-min-tokens 60001` too if short conversations should also skip RAM parking. The existing RAM cache
+remains a fallback when disk parking cannot complete. Without a directory, the serving path is unchanged.
+
+This automatic tier supports ordinary serving and `--layer-split`, including MTP on its owning stage. It does not support
+`--batch` or `--peer-device`. Each stage uses the existing session format in its own file; the complete group is registered
+only after every stage succeeds. The restore validates every file and stage before writing to any GPU. K/V is streamed
+through bounded buffers rather than captured whole in RAM; running state and the deepest complete checkpoint still need
+RAM and obey the existing free-memory floor. Storage, read and validation failures miss the cache; a transfer failure after
+device writes begin remains fatal, as with RAM restoration. Logs report parked/restored tokens, bytes, time and eviction or
+failure reasons. The existing `/metrics` RAM cache counters do not include this disk tier.
+
+The directory must be owned by the user and not writable by other users. An exclusive lock protects it from a second
+engine. Runs are disposable: QUIT/EOF removes the run directory; a later start discards stale runs after acquiring the lock.
+A supervisor that kills the engine must clean up after it exits, or leave the files for the next start to discard. No cache
+index is loaded across starts. This tier neither changes the public SAVE/RESTORE commands nor enables layer-split session
+files through those commands.
+
 ### Session files (disk)
 
 The conversation the engine holds can be saved to a file and restored later, also after a restart of the same engine version,

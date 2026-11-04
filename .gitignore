@@ -95,3 +95,7 @@ node_modules/
 /build-spark/
 /build-vision-spark/
 /.venv-build/
+
+# Disposable conversation cache data and local environment links
+.venv
+/kv-cache/

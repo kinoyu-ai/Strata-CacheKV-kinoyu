@@ -164,6 +164,50 @@ int main() {
     check(session_file_write(good.string(), original, id, written, error), "write succeeds");
     check(error.empty(), "write leaves no error");
 
+    // Bounded disk reads keep payloads in their original open file, validated before GPU transfer.
+    {
+        SessionReadLimits limits; limits.stream_kv = true;
+        size_t largest_admission = 0;
+        limits.admit = [&](uint64_t n, std::string&) { largest_admission = std::max<uint64_t>(largest_admission, n); return true; };
+        SavedConversation streamed; size_t n = 0;
+        check(session_file_read(good.string(), id, streamed, n, error, limits), "streamed read succeeds");
+        check(same(original, streamed), "streamed read equals original");
+        check(streamed.kv.front().k.is_file_backed(), "KV has disk backing");
+        const auto moved = dir / "renamed-stream.bin";
+        fs::rename(good, moved);
+        check(same(original, streamed), "streamed buffers own original open handle after rename");
+        fs::rename(moved, good);
+        auto damaged = slurp(good); damaged[damaged.size()/2] ^= 1;
+        const auto corrupt = dir / "stream-corrupt.bin"; spit(corrupt, damaged);
+        SavedConversation keep = original;
+        check(!session_file_read(corrupt.string(), id, keep, n, error, limits), "streaming rejects corrupt payload");
+        check(same(keep, original), "streaming refusal leaves output untouched");
+        limits.admit = [](uint64_t, std::string& why) { why = "test RAM refusal"; return false; };
+        check(!session_file_read(good.string(), id, keep, n, error, limits), "streaming respects RAM floor");
+        fs::remove(corrupt);
+    }
+    {
+        auto meta = original; meta.kv.clear();
+        SessionKvSource src;
+        src.format = 3; src.cells = 65; src.heads = 1; src.head_dim = 64; src.page_size = 4;
+        src.sizes[0] = (65u << 20) + 7;
+        src.read = [](size_t, size_t, void* dst, size_t n) { std::memset(dst, 0x5a, n); return true; };
+        const auto path = dir / "bounded-large.bin";
+        size_t n = 0;
+        check(session_file_write(path.string(), meta, std::vector<SessionKvSource>{src}, id, n, error),
+              "large streamed fixture");
+        SessionReadLimits limits; limits.stream_kv = true;
+        uint64_t largest = 0;
+        limits.admit = [&](uint64_t bytes, std::string&) { largest = std::max(largest, bytes); return bytes < (40u << 20); };
+        SavedConversation back;
+        check(session_file_read(path.string(), id, back, n, error, limits), "65 MiB KV fits bounded RAM read");
+        check(largest < (40u << 20) && back.kv[0].k.bytes() < 1024, "no full host KV allocation");
+        std::array<uint8_t, 17> part{};
+        check(back.kv[0].k.read(part.data(), (16u << 20) - 3, part.size()) &&
+              std::all_of(part.begin(), part.end(), [](auto x) { return x == 0x5a; }), "bounded read crosses a chunk boundary");
+        fs::remove(path);
+        check(back.kv[0].k.read(part.data(), 123, part.size()), "open file backing survives unlink");
+    }
     // golden: format v1 is frozen. The fixed sample must give these exact bytes (little-endian header fields at
     // fixed offsets, and a fixed hash of the whole file); a format change must bump the version and this test.
     {

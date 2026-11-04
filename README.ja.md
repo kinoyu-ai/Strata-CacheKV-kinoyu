@@ -1,3 +1,12 @@
+# Strata：一時ディスクKVキャッシュ追加Fork
+
+[Niko1221/Strata](https://github.com/Niko1221/Strata) v0.2.10を元に、長い会話の交代時に使う一時ディスクキャッシュを追加したソース配布版です。
+**初期状態はオフ**です。このForkをソースからビルドしてください。下記の上流版インストーラーには追加機能は含まれません。
+
+[ビルド・有効化・無効化・検証結果](docs/DISK_KV_CACHE_FORK.ja.md)。上流のMITライセンスを維持します。以下は上流のREADMEです。
+
+---
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/host/public/brand/strata-lockup-dark.svg">

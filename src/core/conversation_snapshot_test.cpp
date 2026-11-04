@@ -191,6 +191,30 @@ void full_session(int fmt, int mode, int experts) {
               x.checkpoints.size()==y.checkpoints.size() && equal(x.kv[0],y.kv[0]) && equal(x.kv.back(),y.kv.back()),
               "streamed file equals captured file");
         check(slurp(p1)==slurp(p2),"streamed file is byte-identical to the captured file");
+        SessionReadLimits limits;
+        limits.stream_kv = true;
+        check(conversation_session_read_limits(limits,ss,g,draft.state,96,1,err), "bounded file read limits");
+        SavedConversation streamed;
+        check(session_file_read(p1,id,streamed,n1,err,limits), "bounded disk read");
+        check(conversation_snapshot_validate(streamed,ss,g,draft.state,err), "validate bounded disk snapshot");
+        fill(13);
+        check(conversation_snapshot_restore(streamed,ss,g,draft.state,err)==ConversationRestore::restored,
+              "restore from bounded disk buffers");
+        SavedConversation streamed_back;
+        check(snap_save(streamed_back,view,ss,g,draft.state,err), "capture streamed restore");
+        check(streamed_back.live.gdn==b.live.gdn && streamed_back.live.ple==b.live.ple &&
+              streamed_back.live.dead==b.live.dead && equal(streamed_back.kv[0],b.kv[0]) &&
+              equal(streamed_back.kv.back(),b.kv.back()), "disk restore exactness including draft ring");
+        // Pointer overload used by stages that do not own the draft.
+        SavedConversation stage_meta,stage_read;
+        std::vector<SessionKvSource> stage_sources;
+        check(conversation_snapshot_sources(stage_meta,stage_sources,view,ss,g,nullptr,err), "disk stage sources without draft");
+        check(stage_sources.size()+1==sources.size(), "no draft source in non-owner stage");
+        check(session_file_write(p2,stage_meta,stage_sources,id,n2,err), "write non-draft stage");
+        SessionReadLimits stage_limits; stage_limits.stream_kv=true;
+        check(conversation_session_read_limits(stage_limits,ss,g,nullptr,96,1,err), "non-draft stage limits");
+        check(session_file_read(p2,id,stage_read,n2,err,stage_limits) &&
+              conversation_snapshot_validate(stage_read,ss,g,nullptr,err), "validate disk non-draft stage");
         std::error_code ec;
         fs::remove_all(dir,ec);
         auto empty_ids=std::vector<int32_t>{};

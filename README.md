@@ -1,3 +1,19 @@
+# Strata — disposable disk KV cache fork
+
+This is a source fork of [Niko1221/Strata](https://github.com/Niko1221/Strata), based on **v0.2.10**
+(commit `ffa80d73133ea5c548aefe57889a16e8085a938f`). It adds an **optional, temporary disk conversation cache**
+for long conversations that take turns on the same engine, including layer-split CUDA serving with MTP.
+
+**The feature is off by default.** Build this checkout to use it; the upstream installers and release binaries
+linked below do not contain this fork's changes. No fork binaries or automatic update feed are provided.
+See [build, enable/disable and validation instructions](docs/DISK_KV_CACHE_FORK.md)
+or [日本語](docs/DISK_KV_CACHE_FORK.ja.md).
+
+The upstream project and its MIT license are preserved. This fork is maintained separately; support requests for
+this feature should be directed to this fork. The original upstream README follows.
+
+---
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="apps/host/public/brand/strata-lockup-dark.svg">
