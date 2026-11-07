@@ -43,10 +43,14 @@ Add these pairs to the engine `args` of your existing model configuration:
 
 ```json
 [
+  "--conversation-cache-mib", "8192",
+  "--conversation-cache-slots", "64",
+  "--conversation-cache-min-tokens", "0",
+  "--conversation-cache-tier-order", "ram-first",
   "--conversation-cache-dir", "/mnt/fast-cache/strata-kv",
   "--conversation-cache-disk-mib", "12288",
   "--conversation-cache-disk-min-tokens", "60001",
-  "--conversation-cache-min-tokens", "60001"
+  "--conversation-cache-disk-min-free-mib", "512"
 ]
 ```
 
@@ -56,16 +60,29 @@ access. Parent directories must exist and be traversable; the engine can create 
 storage is mounted before starting. No device is formatted or selected automatically. Restart the engine after
 changing its arguments. An Optane device is optional; it has not been tested for this fork.
 
+The example uses up to 8192 MiB and 64 parked conversations in RAM. `ram-first` is the new default placement:
+use RAM first, then spill the least recently used unpinned/unguarded RAM entry on a byte/slot/physical-memory eviction.
+A state too large or unable to enter RAM is streamed straight from the active session to disk instead.
+`disk-first` selects the earlier behavior and reproduces the placement used for the original benchmark below.
+Short conversations can remain in RAM (`--conversation-cache-min-tokens 0`), while disk requires 60001 tokens.
+RAM spills hand ownership of the existing buffers to the disk writer; no complete K/V duplicate is created.
+Every GPU stage is registered only after all files succeed. Explicit/poison flushes never spill.
+
+The RAM budget is for parked conversation images, not the entire process. The existing 2560 MiB free-RAM floor
+remains enforced. Restores may spill/release older RAM entries to admit their state, while protecting the incoming
+disk group and any borrowed RAM donor. The disk tier has its own 512 MiB free-space floor; ordinary session SAVE
+keeps its separate existing setting.
+
 The default capacity is 12288 MiB (12 GiB) and the default minimum captured conversation length is 60001 tokens.
 The minimum counts captured state, including processed generated tokens. Last-used entries are evicted first.
 The incoming entry is protected while parking the outgoing one. An entry larger than the budget is skipped.
-The final flag also skips short conversations in the existing RAM parking tier; omit it if you want the old RAM policy.
-The RAM cache remains a fallback and its existing free-memory floor is enforced.
+The RAM and disk minimum lengths are independent. Set the RAM minimum to 60001 to exclude short RAM entries too.
+Set `--conversation-cache-mib 0` for disk-only parking; remove the disk-directory option for RAM-only parking.
 
 ## Disable and clean up
 
 Remove `--conversation-cache-dir` and its value, or set `--conversation-cache-disk-mib 0`, then restart.
-To restore the original RAM policy too, remove `--conversation-cache-min-tokens` and its value.
+To restore the original auto-sized RAM policy, remove the explicit RAM budget, slot count and minimum-token options.
 Without a directory, no disk tier is enabled. No disk cache is restored across restarts.
 
 QUIT/EOF removes the process's run directory. A killed process can leave files until the next start; that start
@@ -128,3 +145,8 @@ the highest sampled temperature was 60 C. Host MemAvailable remained above the e
 Limits: no statistical speedup claim, no OS page-cache flush, no full 12 GiB physical fill test, no Optane hardware test,
 and no HIP/SYCL/Metal/Windows build validation. Capacity/LRU tests use small synthetic files. Performance on other models,
 conversation shapes and storage devices has not been measured. The feature stays opt-in.
+
+The new RAM-first integration was checked in the local 0.2.11 CUDA port on two V100s with MTP. A test-only
+one-entry RAM limit and disk minimum of one token forced A (2652 tokens) -> short S -> short B -> A to spill
+and restore 2645 tokens; the response matched the original engine on the same input. This KV test used a temporary
+NVMe directory, not the Optane drive, and is not an 8 GiB saturation or production-threshold performance benchmark.

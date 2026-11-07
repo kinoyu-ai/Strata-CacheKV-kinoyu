@@ -23,6 +23,28 @@ SavedConversation image(std::initializer_list<int32_t> ids, bool cvec = true) {
 
 int main() {
     {
+        ConversationCache cache(1u << 20, 1);
+        std::vector<int32_t> spilled;
+        cache.set_eviction_sink([&](SavedConversation&& s) {
+            check(cache.size() == 0 && cache.bytes() == 0, "spill ownership is outside RAM accounting");
+            spilled.push_back(s.live.ids.front());
+        });
+        check(cache.put(image({1,2,3})), "tier first entry in RAM");
+        check(spilled.empty(), "RAM capacity used before spill");
+        auto match = cache.best(std::vector<int32_t>{1,2,3,4}, {}, true);
+        cache.guard(match.serial);
+        check(!cache.make_room(1) && spilled.empty(), "guarded donor never spills");
+        cache.external_park_succeeded(); check(!cache.guard_blocked(), "disk fallback satisfies guarded park");
+        cache.unguard();
+        check(cache.put(image({4,5,6})), "next RAM entry spills oldest");
+        check(spilled == std::vector<int32_t>{1}, "LRU ownership reaches slower tier");
+        cache.clear(); check(spilled.size() == 1, "poison/explicit clear never spills");
+        cache.set_eviction_sink([](SavedConversation&&) { throw 1; });
+        check(cache.put(image({7,8})), "entry before failed spill");
+        check(cache.put(image({9,10})), "failed optional spill still releases RAM");
+    }
+
+    {
         ConversationBuffer bytes;
         const size_t first = ConversationBuffer::segment_bytes + 17;
         const size_t peak = bytes.allocation_peak(first);

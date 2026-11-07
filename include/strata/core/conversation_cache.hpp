@@ -9,6 +9,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
+#include <cstdio>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -406,13 +408,24 @@ public:
     // own allocation, far above glibc's mmap threshold, so dropping an entry returns the whole footprint
     // to the kernel at once - the next admission check reads it back from /proc/meminfo.
     // False when none can go (empty, or only entries that hold a pinned shared prefix are left).
+    // A capacity/RAM-pressure eviction can hand ownership to a slower tier. Explicit clear(), poison flushes,
+    // take(), and superseded-copy removal never spill. The evicted image no longer counts against the RAM budget.
+    void set_eviction_sink(std::function<void(SavedConversation&&)> sink) { eviction_sink_ = std::move(sink); }
+    void external_park_succeeded() { guard_blocked_ = false; }
     bool evict_oldest() {
         // the oldest entry that holds no pinned shared prefix and is not the guarded (borrowed) donor
         for (size_t i = 0; i < entries_.size(); ++i) {
             if (entries_[i].pinned() || (guarded_ != 0 && serials_[i] == guarded_)) continue;
-            bytes_ -= entries_[i].bytes();
-            erase(i);
-            ++evictions_;
+            if (eviction_sink_) {
+                SavedConversation outgoing = take(i);
+                ++evictions_;
+                try { eviction_sink_(std::move(outgoing)); }
+                catch (...) { std::fprintf(stderr, "strata serve: RAM cache spill failed; dropping evicted conversation\n"); }
+            } else {
+                bytes_ -= entries_[i].bytes();
+                erase(i);
+                ++evictions_;
+            }
             return true;
         }
         return false;
@@ -532,6 +545,7 @@ private:
     }
     size_t budget_ = 0, slots_ = 0, bytes_ = 0, evictions_ = 0, superseded_ = 0, borrowed_ = 0;
     int64_t min_tokens_ = 0;   // --conversation-cache-min-tokens: 0 parks every conversation, whatever its size
+    std::function<void(SavedConversation&&)> eviction_sink_;
     std::deque<SavedConversation> entries_; // least recently active first
     std::deque<uint64_t> serials_;          // entries_[i]'s identity, never reused
     uint64_t next_serial_ = 1, guarded_ = 0;

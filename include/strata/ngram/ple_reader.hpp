@@ -17,6 +17,7 @@
 #pragma once
 
 #include "strata/platform/direct_file.hpp"
+#include "strata/ngram/ple_disk_options.hpp"
 
 #include <cstdint>
 #include <string>
@@ -29,6 +30,8 @@ inline constexpr uint32_t PAGE = 4096;
 
 struct ReaderStats {
     uint64_t requests = 0;        ///< rows asked for
+    uint64_t disk_hits = 0;       ///< page jobs served from the optional disk tier
+    uint64_t disk_bytes = 0;      ///< bytes served from the optional disk tier
     uint64_t cache_hits = 0;      ///< rows served from the row cache
     uint64_t dedup_rows = 0;      ///< rows that shared a page already being read in the same ticket
     uint64_t reads = 0;           ///< SSD read requests issued
@@ -60,7 +63,10 @@ public:
     /// calls. false: the caller's thread does it (A/B arm).
     /// `row_bytes`: one row's size in the file (90 IQ4_NL, 160 FP8), at most one page.
     bool open(const std::string& path, uint64_t table_offset, uint64_t n_rows, uint32_t max_inflight,
-              uint64_t cache_rows, std::string& err, bool io_thread = true, uint32_t row_bytes = ROW_BYTES);
+              uint64_t cache_rows, std::string& err, bool io_thread = true, uint32_t row_bytes = ROW_BYTES,
+              const std::vector<PleDiskLocation>& disk_cache = {});
+    /// After collecting all tickets, wait for optional background cache fills (validation/measurement).
+    void flush_disk_cache();
     uint32_t row_bytes() const;
     void close();
     bool is_open() const;

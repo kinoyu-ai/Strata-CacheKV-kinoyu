@@ -400,7 +400,7 @@ bool PleTable::open(const std::string& gguf_path, std::string& err, const PleIoO
         impl_->file = nullptr;
         impl_->data = nullptr;
         if (!impl_->reader.open(gguf_path, table_offset, n_rows, io.max_inflight, io.cache_rows, err, io.io_thread,
-                                impl_->rb)) {
+                                impl_->rb, io.disk_cache)) {
             close();
             return false;
         }
@@ -747,6 +747,12 @@ std::string PleTable::io_report() const {
     if (s.keepalive_reads > 0 && n > 0 && n < (int) sizeof buf)
         std::snprintf(buf + n, sizeof buf - (size_t) n, ", SSD kept awake by %llu reads (slowest %.1f ms)",
                       (unsigned long long) s.keepalive_reads, s.keepalive_us_max / 1000.0);
+    if (s.disk_hits > 0) {
+        const size_t used = std::strlen(buf);
+        if (used < sizeof buf)
+            std::snprintf(buf + used, sizeof buf - used, ", disk-cache hits %llu (%.1f MB)",
+                          (unsigned long long) s.disk_hits, (double) s.disk_bytes / 1e6);
+    }
     return buf;
 }
 

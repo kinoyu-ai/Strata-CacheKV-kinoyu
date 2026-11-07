@@ -21,6 +21,8 @@
 //
 // All of those are asserted observable in `ple_parity.cpp` rather than trusted.
 #pragma once
+#include "strata/ngram/ple_disk_options.hpp"
+#include <vector>
 
 #include <cstdint>
 #include <string>
@@ -162,6 +164,7 @@ struct PleIoOptions {
     /// (see PleReader::set_keepalive).
     double keepalive_ms = 0;
     double keepalive_window_s = 60;
+    std::vector<strata::ngram::PleDiskLocation> disk_cache; ///< optional process-local page cache roots
 };
 
 /// The PLE table.  Held by pointer-to-impl so this header does not drag `<windows.h>` into every
