@@ -68,3 +68,6 @@ A raw I/O probe of 4096 random 90-byte rows with the RAM row cache disabled took
 NVMe and 66–67 ms after disk-cache hits on these USB drives, with identical bytes. It did not show a speedup.
 Each root used 512 MiB; the measurement ends at read completion and excludes waiting for background fills.
 This was a reference probe concurrent with CPU compilation, not a prefill benchmark or an end-to-end performance claim.
+
+
+The v0.2.12 update passed the same eight host tests, PLE selftest and real two-Optane tests, plus five GPU state tests and 376 API tests. The v0.2.12 CUDA engine also restored a 62k-token KV group from a dedicated third Optane with matching answers. See [version-specific validation](DISK_KV_CACHE_FORK.md#v0212-upgrade-validation-2026-11-08).

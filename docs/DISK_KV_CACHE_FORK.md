@@ -2,7 +2,7 @@
 
 ## What this fork changes
 
-Based on Strata v0.2.10 / engine 0.1.56, this fork parks long outgoing conversations in temporary files when
+Based on Strata v0.2.12 / engine 0.1.58, this fork parks long outgoing conversations in temporary files when
 another conversation takes over. It stores each GPU stage in its own session-format file and registers the
 group only after every stage is written. All files, stage geometry, tokens, images and checkpoints are validated
 before any GPU is overwritten. K/V is read and written in bounded blocks; running state and checkpoints still
@@ -58,7 +58,7 @@ This is an argument excerpt, not a complete model configuration. `/mnt/fast-cach
 it with a dedicated directory on your chosen mounted storage, owned by the service user without group/other write
 access. Parent directories must exist and be traversable; the engine can create the leaf directory. Confirm the
 storage is mounted before starting. No device is formatted or selected automatically. Restart the engine after
-changing its arguments. An Optane device is optional; it has not been tested for this fork.
+changing its arguments. An Optane device is optional; version-specific hardware checks are listed in the validation section.
 
 The example uses up to 8192 MiB and 64 parked conversations in RAM. `ram-first` is the new default placement:
 use RAM first, then spill the least recently used unpinned/unguarded RAM entry on a byte/slot/physical-memory eviction.
@@ -96,6 +96,9 @@ show activity. A directory, capacity and minimum line appears when the tier star
 report that disk caching is disabled.
 
 ## Validation actually performed
+
+The following original benchmark and nine-test/API results were measured on **v0.2.10**, not v0.2.12.
+Version-specific upgrade results are recorded below.
 
 Passed on Linux with two V100 GPUs, CUDA 12.9, sm_70, Qwen3.8-Flash-Next IQ3_S, `k8v4`, MTP,
 262144-token context, parallelism 1 and layer split 24:
@@ -142,7 +145,7 @@ Every A answer matched the original engine. The A snapshot was 1006707056 bytes 
 and recomputed the answer. The tests kept both GPUs at 150 W, cooled below 50 C between cases and used a 75 C test stop;
 the highest sampled temperature was 60 C. Host MemAvailable remained above the existing 2560 MiB floor.
 
-Limits: no statistical speedup claim, no OS page-cache flush, no full 12 GiB physical fill test, no Optane hardware test,
+Limits of the original v0.2.10 validation: no statistical speedup claim, no OS page-cache flush, no full 12 GiB physical fill test, no Optane hardware test,
 and no HIP/SYCL/Metal/Windows build validation. Capacity/LRU tests use small synthetic files. Performance on other models,
 conversation shapes and storage devices has not been measured. The feature stays opt-in.
 
@@ -150,3 +153,30 @@ The new RAM-first integration was checked in the local 0.2.11 CUDA port on two V
 one-entry RAM limit and disk minimum of one token forced A (2652 tokens) -> short S -> short B -> A to spill
 and restore 2645 tokens; the response matched the original engine on the same input. This KV test used a temporary
 NVMe directory, not the Optane drive, and is not an 8 GiB saturation or production-threshold performance benchmark.
+
+## v0.2.12 upgrade validation (2026-11-08)
+
+The fork is now based on upstream v0.2.12 / engine 0.1.58. Eight host cache tests, five GPU snapshot/validation tests
+(including asynchronous checkpoint modes and injected transfer failures), 376 existing server API tests, and the PLE
+selftest passed. The Ngram disk-cache tests also passed on two dedicated ext4 Optane volumes.
+
+On Linux, CUDA 12.9, two V100 16 GiB cards at 150 W, Unsloth v3.1 UD-IQ3_XXS, k8v4, MTP, context 262144 and layer split 24,
+a test-only **one-entry RAM limit** forced a 62074-token conversation A through RAM to a third, dedicated Optane volume.
+The disk minimum stayed at 60001, RAM at 8192 MiB and disk at 12288 MiB. A -> short S -> short T -> A restored 62067 tokens
+from a two-stage 1006707064-byte group. A's answer matched the same engine with the conversation/Ngram disk caches disabled.
+A subsequent long B -> A -> B also reused the RAM states and preserved each answer; all returned long answers accepted six
+of six MTP drafts.
+
+| Observation | Prefill time | Reused tokens |
+| --- | ---: | ---: |
+| Caches disabled, cold A | 35.50 s | 0 |
+| Caches enabled, cold A | 35.82 s | 0 |
+| A restored from Optane after short requests | 5.36 s | 62067 |
+| A restored from RAM after long B | 1.42 s | 62067 |
+
+These are `timings.prompt_ms`, **not response completion times**. RAM spill took 6.10 s, disk validation/read 2.93 s, and
+the GPU restore 2.18 s. Spill cost is paid by the request that evicts the RAM entry. This was a functional test with one
+sample per case, no OS page-cache flush, and a separate Split Engine compile running in parallel: it is not a controlled
+performance comparison or a benchmark of an 8 GiB/full-disk cache. Both Ngram disk roots were enabled in the cache-on run;
+this does not isolate or prove a Ngram speedup. Highest sampled GPU temperature was 65 C and MemAvailable stayed above 6.5 GiB.
+The normal configuration uses 64 RAM entries instead of the one-entry test limit. Other backends remain unverified.
