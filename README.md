@@ -1,5 +1,7 @@
 # Strata CacheKV
 
+> このブランチは[V100用Split Engineの実験版](docs/SPLIT_V100_EXPERIMENTAL.ja.md)です。通常運用のキャッシュ版は[main](https://github.com/kinoyu-ai/Strata-CacheKV-kinoyu/tree/main)を使ってください。
+
 **複数エージェントが交代で使う長い会話をSSDへ退避し、Prefillの待ち時間を短縮するStrataのForkです。**
 
 [使い方](docs/DISK_KV_CACHE_FORK.ja.md) · [English guide](docs/DISK_KV_CACHE_FORK.md) · [上流のStrata](https://github.com/Niko1221/Strata)

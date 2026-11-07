@@ -104,6 +104,9 @@ Args parse_args(int argc, char** argv) {
     if (const char* e = std::getenv("FNX_DRAFT"); e && e[0]) a.draft = e;
     if (a.draft != "mtp" && a.draft != "dflash2") throw std::runtime_error("--draft takes mtp or dflash2");
     if (a.draft == "dflash2") {
+#if !FNX_DF2
+        throw std::runtime_error("this split engine was built without DFlash2; use --draft mtp");
+#endif
         if (a.gguf.empty() || a.draft_model.empty() || (a.draft_vocab.empty() && a.mtp_dir.empty()))
             throw std::runtime_error("--draft dflash2 needs --native, --draft-model PACK and --draft-vocab FILE (or --mtp DIR for DIR/draft_vocab.bin)");
         if (a.draft_vocab.empty()) a.draft_vocab = a.mtp_dir + "/draft_vocab.bin";
@@ -1054,6 +1057,7 @@ float half_bits_to_float(uint16_t h) {
 
 // DFlash2 (src/df2_bridge.hpp): the pack, the draft vocabulary's rows of output.weight and the embedding of a token (the model's Q8_0 rows, dequantized as
 // Engine::embed_token does) handed to the bridge, which puts them on the first card
+#if FNX_DF2
 void load_dflash2(fnx::df2::Bridge& br, const fnx::Model& m, const Args& a) {
     std::vector<int32_t> vocab;
     {
@@ -1087,6 +1091,8 @@ void load_dflash2(fnx::df2::Bridge& br, const fnx::Model& m, const Args& a) {
     std::fprintf(stderr, "sfnx: DFlash2 on card 0: %zu draft tokens, %d drafter(s), %.0f MiB of VRAM\n", vocab.size(), br.lanes(), (double) br.vram_bytes() / 1048576.0);
 }
 
+#endif
+
 // the engine state after a failure part way is unknown: say why and _exit at once (the front end starts it again). No
 // destructors: freeing the conversation cache's pinned memory takes minutes, and the stdin reader thread keeps the
 // process up, while the front end waits for the ERR line or EOF
@@ -1114,19 +1120,25 @@ int main(int argc, char** argv) {
     // made in place and failed like the rest, so a card or link refused at load ends with its reason too
     std::optional<fnx::Model> m;
     std::optional<fnx::Mtp> mtp;
+#if FNX_DF2
     std::optional<fnx::df2::Bridge> df2;
+#endif
     std::optional<fnx::Engine> e;
     try {
         m.emplace(a.gguf.c_str());
         if (a.draft == "dflash2") {
+#if FNX_DF2
             df2.emplace();
             load_dflash2(*df2, *m, a);   // before the Engine: it sizes its K/V pool from what is left on the cards
+#endif
         } else {
             mtp.emplace(*m, a.mtp_dir, a.draft_vocab);
         }
         e.emplace(*m, a.max_ctx, a.batch);
         if (mtp) e->mtp_attach(*mtp);
+#if FNX_DF2
         else e->df2_attach(*df2);
+#endif
     } catch (const std::exception& ex) {
         fail(ex);
     }
