@@ -2,6 +2,7 @@
 // engines share is engine_common.cu's (engine_parts.hpp).
 #include <cstdlib>
 #include "engine.hpp"
+#include "ple_io.hpp"
 #include "engine_parts.hpp"
 #include "env.hpp"
 #include "peer_probe.hpp"
@@ -831,6 +832,30 @@ void Engine::embed_rows(int p0, int T, const std::function<int(int)>& tok_at_cel
         const int t = tok_at_cell(q);
         return t >= IMAGE_TOK ? m_.ple_image : t;
     };
+    std::vector<uint8_t> direct_rows;
+    const bool verify_direct = ple_io_direct() && env_flag("FNX_PLE_VERIFY");
+    if (ple_io_direct()) {
+        std::vector<uint32_t> indices((size_t)T * PLE_HEADS);
+        for (int t = 0; t < T; ++t) {
+            const int p = p0 + t;
+            int64_t ctx[PLE_ORDERS]; ctx[0] = tok_at(p); bool cut = false;
+            for (int j = 1; j < PLE_ORDERS; ++j) {
+                const int64_t tk = p-j >= 0 ? tok_at(p-j) : -1;
+                cut = cut || tk < 0 || tk == m_.ple_eos;
+                ctx[j] = cut ? m_.ple_eos : tk;
+            }
+            for (int n = 2; n <= PLE_ORDERS; ++n) {
+                uint64_t mixed = (uint64_t)ctx[0] * m_.ple_mult[0];
+                for (int j = 1; j < n; ++j) mixed ^= (uint64_t)ctx[j] * m_.ple_mult[j];
+                for (int gi = 0; gi < 8; ++gi) {
+                    const int h = (n-2)*8+gi;
+                    indices[(size_t)t*PLE_HEADS+h] = (uint32_t)(mixed % m_.ple_vocab[h] + m_.ple_off[h]);
+                }
+            }
+        }
+        direct_rows.resize(indices.size() * prb);
+        ple_io_read(indices.data(), indices.size(), direct_rows.data());
+    }
     for (int t = 0; t < T; ++t) {
         const int p = p0 + t;
         embed_token(tok_at_cell(p), p, emb + (size_t) t * N);
@@ -850,7 +875,10 @@ void Engine::embed_rows(int p0, int T, const std::function<int(int)>& tok_at_cel
             for (int gi = 0; gi < 8; ++gi) {
                 const int h = (n - 2) * 8 + gi;
                 const uint64_t r = mixed % m_.ple_vocab[h] + m_.ple_off[h];
-                const uint8_t* src = pt.data + r * prb;
+                const uint8_t* src = direct_rows.empty() ? pt.data + r * prb
+                    : direct_rows.data() + ((size_t)t * PLE_HEADS + h) * prb;
+                if (verify_direct && std::memcmp(src, pt.data + r * prb, prb))
+                    throw std::runtime_error("direct PLE row differs from the mapped source");
                 for (int b = 0; b < PLE_DIM / 32; ++b) {
                     float* dst = &ple[(size_t) t * N + h * PLE_DIM + b * 32];
                     uint16_t dh;

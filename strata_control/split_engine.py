@@ -20,10 +20,13 @@ has actually been run:
     512 experts): routed experts Q4_K/Q5_K/Q5_1/Q8_0/Q4_0 (UD-Q4_K_XL, Q8_0) or the i-quants IQ2_S/IQ3_XXS/IQ3_S/IQ4_XS/IQ4_NL and Strata's
     Q2_0 (UD-IQ4_XS, the IQ3_S set); token embeddings, shared expert, output head Q8_0, or, in a set with i-quant or Q2_0 experts,
     any type the loader converts to Q8_0/F32 when it reads the file (src/split/src/tensor_convert.hpp);
-  - ALL routed experts fit in the cards' memory (the expert cache is off: with it the engine keeps a 74 GiB pinned copy of the
+  - By default ALL routed experts fit in the cards' memory (the expert cache is off: with it the engine keeps a 74 GiB pinned copy of the
     experts in RAM) and the RAM that stays (the 27.5 GiB locked embedding table, a few GiB of buffers and the conversation cache)
     is available with room to spare;
   - context at most TESTED_CONTEXT (128K).
+Explicit mode "on" additionally accepts sm_70 with a matching custom build. split_expert_ram_gib enables host backing;
+split_fixed_experts uses immutable RAM/VRAM backing plus bounded window slots instead of a full host mirror. --ple-io direct
+avoids pinning the PLE table. These options are never selected by Auto and are included in both memory checks.
 Anything else: use_split False and one plain line saying why. The server also falls back to the normal layer split if the split
 engine refuses or fails to start (serve/server.py, "split_fallback").
 """
@@ -119,6 +122,7 @@ class ModelFacts:
     experts: int
     ple_type: str | None = "IQ4_NL"     # per_layer_token_embd.weight
     output_type: str | None = "Q8_0"    # output.weight
+    ple_ram_bytes: int = 0              # table bytes that direct PLE reads can avoid pinning
 
 
 @dataclasses.dataclass
@@ -161,6 +165,7 @@ def scan_model(first_shard: str | pathlib.Path) -> ModelFacts:
     ple_type = None
     output_type = None
     embd_ram = 0
+    ple_ram = 0
     layers = 0
     experts = 0
     for shard in shards:
@@ -183,14 +188,16 @@ def scan_model(first_shard: str | pathlib.Path) -> ModelFacts:
                 embd_ram += b
             elif n == "per_layer_token_embd.weight":
                 ple_type = t.type_name
+                ple_ram += b
                 embd_ram += b
             elif n == "output.weight":
                 output_type = t.type_name
-    return ModelFacts(routed_types, routed_bytes, embd_type, shexp, embd_ram, layers, experts, ple_type, output_type)
+    return ModelFacts(routed_types, routed_bytes, embd_type, shexp, embd_ram, layers, experts, ple_type, output_type, ple_ram)
 
 
 def decide(*, enabled: bool, system: str, cards: list[Card], ram_total_gib: float, ram_available_gib: float, model: ModelFacts,
-           context: int = TESTED_CONTEXT, allow_untested: bool = False, cache_mib: int = CONVERSATION_CACHE_MIB) -> Decision:
+           context: int = TESTED_CONTEXT, allow_untested: bool = False, cache_mib: int = CONVERSATION_CACHE_MIB,
+           expert_ram_gib: float | None = None, fixed_experts: bool = False, ple_direct: bool = False, ple_rows: int = 65536) -> Decision:
     """Whether the all-cards split engine runs this launch, with plain reasons when not."""
     if not enabled:
         return Decision(False, ["the all-cards split engine is off (it is opt-in)"])
@@ -251,8 +258,20 @@ def decide(*, enabled: bool, system: str, cards: list[Card], ram_total_gib: floa
         why.append(f"the per-layer embedding table is {model.ple_type}, it needs IQ4_NL or Q8_0")
     if (model.layers, model.experts) != (LAYERS, EXPERTS):
         why.append("it only knows Qwen3.8-Flash-Next (48 layers, 512 experts)")
-    need_vram = model.routed_bytes / GIB / max(n, 1) + CARD_OVERHEAD_GIB
-    need_ram = model.embd_ram_bytes / GIB + RAM_PINNED_BUFFERS_GIB + cache_mib / 1024
+    import math
+    if expert_ram_gib is not None and (not math.isfinite(expert_ram_gib) or expert_ram_gib < 0):
+        return Decision(False, ["split_expert_ram_gib must be a finite nonnegative number"])
+    if fixed_experts and expert_ram_gib is None:
+        return Decision(False, ["split_fixed_experts needs split_expert_ram_gib"])
+    routed_gib = model.routed_bytes / GIB
+    offload = min(routed_gib, expert_ram_gib or 0)
+    need_vram = (routed_gib - offload) / max(n, 1) + CARD_OVERHEAD_GIB
+    embd_ram = model.embd_ram_bytes
+    if ple_direct:
+        embd_ram = max(0, embd_ram - model.ple_ram_bytes) + ple_rows * 192
+    # Dynamic slots keep a complete host mirror. Fixed placement keeps only the cold experts in RAM.
+    expert_host = (offload if fixed_experts else routed_gib) if expert_ram_gib is not None else 0
+    need_ram = embd_ram / GIB + expert_host + RAM_PINNED_BUFFERS_GIB + cache_mib / 1024
     if cards and n >= 2 and min(c.room_mib for c in cards) / 1024 < need_vram:
         has = f"{min(c.room_mib for c in cards) / 1024:.0f} GiB" + (" free" if any(c.free_mib is not None for c in cards) else "")   # free memory when it was read, else the size
         why.append(f"all the experts do not fit in the cards' memory (each card needs about {need_vram:.0f} GiB, has {has})")
@@ -279,8 +298,19 @@ def split_config(base: dict, decision: Decision, *, exe: str, native: str, mtp_d
                    "--spec", "6", "--lookup", "15", "--conversation-cache-mib", str(cache_mib), "--batch", str(min(MAX_LANES, max(lanes, 1)))]
     if vision:
         cfg["args"].append("--vision")
-    # every expert in the cards' memory, no expert cache, no arena: the engine reads these two at start
     cfg["env"] = {**(base.get("env") or {}), "FNX_ARENA": "0", "FNX_EXPERT_RAM_GIB": "off"}
+    if base.get("split_expert_ram_gib") is not None:
+        cfg["env"].update(FNX_EXPERT_RAM_GIB=str(float(base["split_expert_ram_gib"])),
+                          FNX_ARENA="0" if base.get("split_fixed_experts") else "1",
+                          FNX_FIXED_EXPERTS="1" if base.get("split_fixed_experts") else "0")
+    # Preserve opt-in bounded PLE options, including every disk root in order.
+    old_args = [str(a) for a in base.get("args") or []]
+    for i, flag in enumerate(old_args):
+        width = {"--ple-io": 1, "--ple-row-cache": 1, "--ple-disk-cache": 2}.get(flag)
+        if width is not None:
+            if i + width >= len(old_args):
+                raise ValueError(flag + " needs values")
+            cfg["args"].extend(old_args[i:i+width+1])
     cfg["split_fallback"] = {k: base[k] for k in ("exe", "args", "env", "layer_split", "replicas", "user_args", "drafting", "cwd") if k in base}
     # The split engine runs the model's own draft layer (the MTP) and nothing else. Saying so in the config ("drafting": "mtp") keeps serve/server.py's
     # drafter step, which resolves Auto to DFlash2 where the engine has it, from adding DFlash2 flags to the split engine's arguments (it would refuse them
@@ -427,7 +457,7 @@ def _auto_gates(d: Decision, cards: list[Card], model: ModelFacts, chosen: str, 
     if amd and mode_ != "on" and not all(c.arch_name in AUTO_SPLIT_AMD_ARCHS for c in cards):
         # opt-in on AMD: auto keeps the layer split (quiet), `--split-engine on` runs the split
         return Decision(False, [f"the all-cards split engine is not automatic on {cards[0].arch_name} yet; it starts only with --split-engine on"], d.cards)
-    if not amd and chosen == "auto" and not all(c.cc in AUTO_SPLIT_BEATS_DFLASH2 for c in cards):
+    if not amd and mode_ != "on" and chosen == "auto" and not all(c.cc in AUTO_SPLIT_BEATS_DFLASH2 for c in cards):
         return Decision(False, ["on this card the layer split with DFlash2 has not been measured slower than the all-cards split engine"], d.cards)
     return None
 
@@ -435,6 +465,22 @@ def _auto_gates(d: Decision, cards: list[Card], model: ModelFacts, chosen: str, 
 #: what the rule assumes of a model that is not on this computer yet (a download still to come): a Qwen3.8-Flash-Next set the engine reads, small enough
 #: for the memory rule; the real files are looked at when they are there
 ASSUMED_MODEL = ModelFacts(routed_types={"Q4_K": 1}, routed_bytes=0, embd_type="Q8_0", shexp_types={"Q8_0": 1}, embd_ram_bytes=0, layers=LAYERS, experts=EXPERTS)
+
+
+def _memory_options(cfg: dict, mode_: str) -> dict:
+    args = [str(a) for a in cfg.get("args") or []]
+    host = cfg.get("split_expert_ram_gib")
+    fixed = cfg.get("split_fixed_experts", False)
+    if (host is not None or fixed) and mode_ != "on":
+        raise ValueError("expert RAM offload requires split_engine=on")
+    if type(fixed) is not bool or isinstance(host, bool):
+        raise ValueError("invalid split expert memory settings")
+    rows = int(_flag(args, "--ple-row-cache") or 65536)
+    cache = int(cfg.get("split_conversation_cache_mib", CONVERSATION_CACHE_MIB))
+    if not 0 <= rows <= 16777216 or not 0 <= cache <= 1048576:
+        raise ValueError("split memory cache size is out of range")
+    return dict(expert_ram_gib=float(host) if host is not None else None, fixed_experts=fixed,
+                ple_direct=_flag(args, "--ple-io") == "direct", ple_rows=rows, cache_mib=cache)
 
 
 def expected(cfg: dict, *, indexes: list[int] | None = None, native: str | None = None, context: int = TESTED_CONTEXT, system: str | None = None,
@@ -462,9 +508,9 @@ def expected(cfg: dict, *, indexes: list[int] | None = None, native: str | None 
         model = ASSUMED_MODEL
         if native and os.path.isfile(native):
             model = (scan or scan_model)(native)
-        experimental_ok = m == "on" and bool(cards) and cards[0].vendor == "amd"
+        experimental_ok = m == "on" and bool(cards) and (cards[0].vendor == "amd" or all(c.cc == 70 for c in cards))
         d = decide(enabled=True, system=system, cards=cards, ram_total_gib=total, ram_available_gib=avail, model=model, context=context,
-                   allow_untested=allow_untested or experimental_ok)
+                   allow_untested=allow_untested or experimental_ok, **_memory_options(cfg, m))
         if not d.use_split or _auto_gates(d, cards, model, chosen, m) is not None:
             return False
         if exe_for_cards is not None:
@@ -563,9 +609,13 @@ def _apply(cfg: dict, *, exe_for_cards, system, allow_untested, probe, ram, scan
         return Decision(False, [f"the model file could not be read ({type(e).__name__})"])
     context = int(_flag(args, "--max-context") or 8192)
     # an AMD architecture nobody has run (gfx1100..1103, gfx1200) starts only on the person's explicit "on", with the engine's own self-test as the guard
-    experimental_ok = mode_ == "on" and bool(cards) and cards[0].vendor == "amd"
+    experimental_ok = mode_ == "on" and bool(cards) and (cards[0].vendor == "amd" or all(c.cc == 70 for c in cards))
+    try:
+        memory = _memory_options(cfg, mode_)
+    except (ValueError, TypeError) as e:
+        return Decision(False, [str(e)])
     d = decide(enabled=True, system=system, cards=cards, ram_total_gib=total, ram_available_gib=avail, model=model, context=context,
-               allow_untested=allow_untested or experimental_ok)
+               allow_untested=allow_untested or experimental_ok, **memory)
     if not d.use_split:
         return d
     gate = _auto_gates(d, cards, model, chosen, mode_)
@@ -597,7 +647,8 @@ def _apply(cfg: dict, *, exe_for_cards, system, allow_untested, probe, ram, scan
         return Decision(False, ["draft_vocab_en.bin is missing"], d.cards)
     lanes = int(cfg.get("parallel") or _flag(args, "--batch") or (AMD_DEFAULT_LANES if amd else DEFAULT_LANES))
     new = split_config(cfg, d, exe=exe, native=native, mtp_dir=mtp, draft_vocab=vocab, context=context, lanes=lanes,
-                       vision=bool(cfg.get("vision")) or "--vision" in args, dflash2_pack=df2_pack)
+                       vision=bool(cfg.get("vision")) or "--vision" in args, dflash2_pack=df2_pack,
+                       cache_mib=int(cfg.get("split_conversation_cache_mib", CONVERSATION_CACHE_MIB)))
     cfg.clear()
     cfg.update(new)
     return d

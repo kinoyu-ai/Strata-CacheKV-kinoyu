@@ -1,6 +1,6 @@
 # Strata CacheKV
 
-> このブランチは[V100用Split Engineの実験版](docs/SPLIT_V100_EXPERIMENTAL.ja.md)です。通常運用のキャッシュ版は[main](https://github.com/kinoyu-ai/Strata-CacheKV-kinoyu/tree/main)を使ってください。
+> このブランチは[V100用Split Engineの実験版](docs/SPLIT_V100_EXPERIMENTAL.ja.md)です。Split用にRAMへ重みを退避する機能とOptaneのNgramキャッシュを追加しています。SplitのディスクKV退避は未対応です。通常運用のキャッシュ版は[main](https://github.com/kinoyu-ai/Strata-CacheKV-kinoyu/tree/main)を使ってください。
 
 **複数エージェントが交代で使う長い会話をSSDへ退避し、Prefillの待ち時間を短縮するStrataのForkです。**
 

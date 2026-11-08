@@ -43,6 +43,7 @@
 
 #include "../src/batch.hpp"
 #include "../src/engine.hpp"
+#include "../src/ple_io.hpp"
 #include "../src/env.hpp"
 #include "../src/session.hpp"
 #include "sfnx_input.hpp"
@@ -67,6 +68,9 @@ struct Args {
     std::string draft = "mtp", draft_model;   // --draft mtp|dflash2 (FNX_DRAFT), --draft-model PACK: DFlash2's runtime pack (tools/dflash2_pack.py)
     int max_ctx = 262144, K = 6, lookup = 15, batch = 1;
     long cache_mib = 0;   // checkpoints and parked conversations in host memory (0: none)
+    std::string ple_io = "ram";
+    uint64_t ple_rows = 65536;
+    std::vector<std::pair<std::string,uint64_t>> ple_disks;
     bool vision = false;  // GENI / BGENI: prompts with images (embeddings from sfnx-vision)
 };
 
@@ -96,6 +100,20 @@ Args parse_args(int argc, char** argv) {
             if (const char* e = std::getenv("FNX_ROPE_SCALE"); e && s != e)
                 throw std::runtime_error("--rope-scale " + s + " and FNX_ROPE_SCALE=" + e + " disagree");
             ::setenv("FNX_ROPE_SCALE", s.c_str(), 1);
+        }
+        else if (k == "--ple-io") {
+            a.ple_io = val();
+            if (a.ple_io != "ram" && a.ple_io != "direct") throw std::runtime_error("--ple-io takes ram or direct");
+        }
+        else if (k == "--ple-row-cache" || k == "--ple-disk-cache") {
+            std::string path;
+            if (k == "--ple-disk-cache") path = val();
+            const std::string value = val(); long long number = 0;
+            const long long limit = k == "--ple-disk-cache" ? 1048576 : 16777216;
+            if (!fnx::parse_whole(value.c_str(),number) || number < 0 || number > limit)
+                throw std::runtime_error(k + " needs a nonnegative integer within range");
+            if (k == "--ple-row-cache") a.ple_rows = (uint64_t)number;
+            else a.ple_disks.emplace_back(path,(uint64_t)number);
         }
         else if (k == "--vision") a.vision = true;
         else throw std::runtime_error("unknown argument " + k);
@@ -1112,6 +1130,7 @@ int main(int argc, char** argv) {
         a = parse_args(argc, argv);
         check_route_env();
         check_test_prompt();
+        fnx::ple_io_configure(a.ple_io == "direct", a.ple_rows, a.ple_disks);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "sfnx: %s\n", e.what());
         return 2;

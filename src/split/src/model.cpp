@@ -1,4 +1,5 @@
 #include "model.hpp"
+#include "ple_io.hpp"
 #include "card_check.hpp"
 #include "env.hpp"
 #include "expert_residency.hpp"
@@ -290,10 +291,11 @@ struct Up {
                                      " the window reads it at");
         return put<float>(t.data, t.nbytes);
     }
+    const std::vector<char>* fixed_resident = nullptr; // opt-in: each expert has one RAM or VRAM copy
     // where a tensor's routed experts are assembled: with an ExpertCache (host_of) their mapped page-locked host copy,
     // else tmp
     uint8_t* expert_buf(size_t bytes, const char** host_of, std::vector<uint8_t>& tmp) {
-        if (!host_of) {
+        if (!host_of || fixed_resident) {
             tmp.resize(bytes);
             return tmp.data();
         }
@@ -312,6 +314,39 @@ struct Up {
             w.p = put<uint8_t>(h, bytes);
             return;
         }
+        if (fixed_resident) {
+            if (store || fixed_resident->size() != bytes / stride)
+                throw std::runtime_error("fixed experts require a plain load and one residency bit per expert");
+            size_t hot_count = 0;
+            for (char v : *fixed_resident) hot_count += v != 0;
+            const size_t cold_count = fixed_resident->size() - hot_count;
+            void* cold = nullptr; void* cold_device = nullptr;
+            if (cold_count) {
+                ck(cudaHostAlloc(&cold, cold_count * stride, cudaHostAllocMapped), "fixed expert RAM");
+                ck(cudaHostGetDevicePointer(&cold_device, cold, 0), "fixed expert mapped pointer");
+                c.host_bytes += cold_count * stride;
+            }
+            std::vector<uint8_t> hot(hot_count * stride);
+            size_t hi = 0, ci = 0;
+            for (size_t e = 0; e < fixed_resident->size(); ++e) {
+                if ((*fixed_resident)[e]) std::memcpy(hot.data() + hi++ * stride, h + e * stride, stride);
+                else std::memcpy((uint8_t*)cold + ci++ * stride, h + e * stride, stride);
+            }
+            const uint8_t* gpu = hot.empty() ? nullptr : put<uint8_t>(hot.data(), hot.size());
+            hi = ci = 0;
+            for (size_t e = 0; e < fixed_resident->size(); ++e)
+                host_of[e] = (*fixed_resident)[e] ? (const char*)gpu + hi++ * stride : (const char*)cold_device + ci++ * stride;
+            if (env_flag("FNX_FIXED_VERIFY")) {
+                uint8_t check[32];
+                for (size_t e = 0; e < fixed_resident->size(); ++e)
+                    for (size_t off : {size_t(0), stride - sizeof(check)}) {
+                        ck(cudaMemcpy(check, host_of[e] + off, sizeof(check), cudaMemcpyDeviceToHost), "fixed expert verification");
+                        if (std::memcmp(check, h + e * stride + off, sizeof(check)))
+                            throw std::runtime_error("fixed expert bytes differ from the source");
+                    }
+            }
+            return; // the bounded window cache installs the final per-expert tables after all layers load
+        }
         void* dp = nullptr;
         if (store) dp = (void*) h;   // the shared host memory has one address for the CPU and the cards
         else ck(cudaHostGetDevicePointer(&dp, (void*) h, 0), "place: mapped pointer");
@@ -323,6 +358,7 @@ struct Up {
     void expert_cache(const std::vector<std::vector<char>>& res, const std::vector<const char*>& hgu, const std::vector<const char*>& hdn,
                       const std::vector<double>* arena_score) {
         ExpertCache& ec = c.ec;
+        const bool fixed = env_flag("FNX_FIXED_EXPERTS");
         std::vector<std::pair<size_t, size_t>> sizes;   // each pool's (gate|up, down) bytes
         for (int l = 0; l < NL; ++l) {
             const LayerW& L = c.L[(size_t) l];
@@ -351,7 +387,9 @@ struct Up {
             for (int l = 0; l < NL; ++l)
                 if (ec.pool_of[l] == p)
                     for (int e = 0; e < NEXP; ++e)
-                        if (res[(size_t) l][(size_t) e]) owner.push_back(l * NEXP + e);
+                        if (fixed
+                                ? (int)owner.size() - ec.s0[p] < EXPERT_WINDOW_SLOTS
+                                : res[(size_t) l][(size_t) e]) owner.push_back(l * NEXP + e);
             if (p == ec.arena_pool)
                 std::stable_sort(owner.begin() + ec.s0[p], owner.end(),
                                  [&](int a, int b) { return (*arena_score)[(size_t) a] < (*arena_score)[(size_t) b]; });
@@ -861,8 +899,10 @@ void load_card(Stager& st, CardW& c, const std::vector<std::vector<char>>& resid
             w.idx_qn = up.f32(L(l, "indexer.q_norm.weight"), QSA_KEY);
             w.idx_kn = up.f32(L(l, "indexer.k_norm.weight"), QSA_KEY);
         }
+        if (env_flag("FNX_FIXED_EXPERTS")) up.fixed_resident = &resident.at((size_t)l);
         w.gu_e = up.expert_rows2(L(l, "ffn_gate_exps.weight"), L(l, "ffn_up_exps.weight"), c.ff0, c.ff1, w.gu_e_stride, hg);
         w.down_e = up.expert_cols(L(l, "ffn_down_exps.weight"), c.ff0 / 32, c.ff1 / 32, w.down_e_stride, hd);
+        up.fixed_resident = nullptr;
         w.sh_gu = up.dense(up.rows2(L(l, "ffn_gate_shexp.weight"), range(c.ff0, c.ff1), L(l, "ffn_up_shexp.weight"), range(c.ff0, c.ff1)));
         w.sh_down = up.dense(up.cols(L(l, "ffn_down_shexp.weight"), range(c.ff0 / 32, c.ff1 / 32)));
         if (!w.sh_gu.s.q || !w.sh_down.s.q) throw std::runtime_error("fnx: the shared expert is not Q8_0");
@@ -894,7 +934,16 @@ void load_card(Stager& st, CardW& c, const std::vector<std::vector<char>>& resid
     c.head_up = up.q8split(st.t(NL, "output_hc_up.weight"));
     c.out = up.dense(up.rows(st.t(NL, "output.weight"), range(c.v0, c.v1)));
     st.done(NL);
-    if (!resident.empty()) {   // tracked, so the engine can place them again with more in RAM (Engine: VRAM short)
+    if (env_flag("FNX_FIXED_EXPERTS")) {
+        // Backing addresses are immutable RAM or VRAM. Only a window-sized pool per expert size is evicted.
+        // Kernels read both address kinds through the existing mapped-pointer tables.
+        const size_t before = c.bytes;
+        Up ue{c, store, &c.expert_mem};
+        ue.expert_cache(resident, hgu, hdn, nullptr);
+        c.expert_bytes = c.bytes - before;
+        std::fprintf(stderr, "fnx: card %d fixed experts: %.2f GiB RAM; weights and window cache %.2f GiB VRAM (no full host mirror)\n",
+                     c.dev, c.host_bytes / (double)(1ull<<30), c.bytes / (double)(1ull<<30));
+    } else if (!resident.empty()) {   // tracked, so the engine can place them again with more in RAM (Engine: VRAM short)
         const size_t before = c.bytes;
         Up ue{c, store, &c.expert_mem};
         ue.expert_cache(resident, hgu, hdn, arena_score);
@@ -1327,9 +1376,11 @@ Model::Model(const std::string& path, Load how, Store* store, const std::string*
     // the host gathers rows of these two every window: a row read from the disk costs milliseconds, so keep them in RAM
     {
         const auto t0 = std::chrono::steady_clock::now();
-        for (const Tensor* t : {tok_embd, ple_table}) lock_in_ram(*t);
-        std::fprintf(stderr, "fnx: %s and %s (%.1f GB) locked in RAM in %.1f s\n", tok_embd->name.c_str(), ple_table->name.c_str(),
-                     (tok_embd->nbytes + ple_table->nbytes) / 1e9, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+        lock_in_ram(*tok_embd);
+        if (!ple_io_direct()) lock_in_ram(*ple_table);
+        std::fprintf(stderr, "fnx: %s%s (%.1f GB) locked in RAM in %.1f s\n", tok_embd->name.c_str(),
+                     ple_io_direct() ? "" : (" and " + ple_table->name).c_str(),
+                     (tok_embd->nbytes + (ple_io_direct() ? 0 : ple_table->nbytes)) / 1e9, std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     }
     for (int64_t v : g.ia(p + "ple.layer_multipliers")) ple_mult.push_back((uint64_t) v);
     for (int64_t v : g.ia(p + "ple.head_offsets")) ple_off.push_back((uint64_t) v);
@@ -1361,6 +1412,12 @@ Model::Model(const std::string& path, Load how, Store* store, const std::string*
     }
     ple_eos = g.i(p + "ple.eos_token_id");
     ple_image = g.i(p + "ple.image_token_id");
+    if (ple_io_direct()) {
+        if (how != Load::PLAIN || ple_table->shard < 0)
+            throw std::runtime_error("PLE direct reads require a plain model and an unconverted file table");
+        ple_io_open(g.shard_path(ple_table->shard), ple_table->offset,
+                    (uint64_t)ple_table->ne[1], (uint32_t)ple_table->row_bytes());
+    }
 #endif
     cards.resize(NCARD);
     // key heads per card (their q and k), value heads (numbered s * NKH + k, listed ascending: the order the card's
@@ -1438,12 +1495,13 @@ Model::Model(const std::string& path, Load how, Store* store, const std::string*
         place_experts();
         return;
     }
+    if (env_flag("FNX_FIXED_EXPERTS") && how != Load::PLAIN) throw std::runtime_error("fixed experts require a plain load");
     if (how == Load::HOLD && !store) throw std::runtime_error("fnx: holding needs a store");
 #if !FNX_27B
     if (how == Load::PLAIN) choose_residency();   // the holder leaves that to its workers: every expert to a host copy
 #endif
     const auto t0 = std::chrono::steady_clock::now();
-    Stager st(g, stage_groups(g), NCARD);
+    Stager st(g, stage_groups(g), NCARD, ple_io_direct() ? 1 : 3);
     std::vector<std::thread> th;
     std::vector<std::string> errs(NCARD);
     for (int c = 0; c < NCARD; ++c)
@@ -1483,10 +1541,12 @@ void Model::choose_residency() {
     if (ram_s && cache) {
         char* end = nullptr;
         ram_gib = std::strtod(ram_s, &end);
-        if (end == ram_s || *end || ram_gib < 0)
+        if (end == ram_s || *end || !std::isfinite(ram_gib) || ram_gib < 0)
             throw std::runtime_error(std::string("fnx: FNX_EXPERT_RAM_GIB: GiB (0 or more) or off, not '") + ram_s + "'");
     }
     if (arena && !cache) throw std::runtime_error("fnx: FNX_EXPERT_RAM_GIB=off needs FNX_ARENA=0 (the arena lends the cache's slots)");
+    if (env_flag("FNX_FIXED_EXPERTS") && (arena || !cache))
+        throw std::runtime_error("FNX_FIXED_EXPERTS needs FNX_ARENA=0 and FNX_EXPERT_RAM_GIB=<GiB>");
     if (cache) {
         const double want = ram_gib * (double) (1ull << 30);
         const char* prof_s = std::getenv("FNX_EXPERT_PROFILE");
@@ -1541,6 +1601,7 @@ void each_card(std::vector<CardW>& cards, F f) {
 }  // namespace
 
 void Model::place_experts() {
+    if (env_flag("FNX_FIXED_EXPERTS")) throw std::runtime_error("fixed experts cannot be placed again; restart with more FNX_EXPERT_RAM_GIB");
     choose_residency();
     each_card(cards, [&](CardW& c) {
         if (c.ec_host_gu.size() != (size_t) NL * NEXP) throw std::runtime_error("fnx: placing experts needs their host copies");

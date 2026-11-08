@@ -101,12 +101,22 @@ if(TARGET strata_kernels AND TARGET strata_core)
   set(_sp_df2 ON)
 endif()
 
+# Bounded optional PLE I/O; kept in C++ so the split CUDA translation units do not include the reader implementation.
+get_filename_component(_split_repo "${_sp}/../.." ABSOLUTE)
+add_library(strata_split_ple STATIC ${_sp}/src/ple_io.cpp
+    ${_split_repo}/src/ngram/ple_reader.cpp ${_split_repo}/src/platform/direct_file.cpp)
+target_include_directories(strata_split_ple PRIVATE ${_split_repo}/include ${_sp}/src)
+target_compile_features(strata_split_ple PRIVATE cxx_std_20)
+find_package(Threads REQUIRED)
+target_link_libraries(strata_split_ple PUBLIC Threads::Threads)
+
 foreach(_n ${STRATA_SPLIT_CARDS})
   if(NOT _n MATCHES "^[234]$")
     message(FATAL_ERROR "STRATA_SPLIT_CARDS: 2, 3 or 4, not ${_n}")
   endif()
   set(_t strata-split-${_n})
   add_executable(${_t} ${_sp_engine} ${_sp_kparts})
+  target_link_libraries(${_t} PRIVATE strata_split_ple)
   if(_fnx_hip)
     # HIP: src/hip first (cuda.h, mma.h stand-ins), the force-included fnx_hip.h after the tree's cuda_runtime.h shim
     target_include_directories(${_t} PRIVATE ${_sp}/src/hip ${_sp}/src ${_sp}/tools ${STRATA_GGML_DIR}/ggml/src/ggml-cuda
@@ -144,6 +154,11 @@ endforeach()
 
 # the CPU unit tests sFNX ships (split rule, ring plan, card checks, batch plan, rope, input parser): plain C++, no GPU
 if(STRATA_BUILD_TESTS)
+  add_executable(split_ple_io_test ${_sp}/tools/ple_io_test.cpp)
+  target_include_directories(split_ple_io_test PRIVATE ${_sp}/src)
+  target_link_libraries(split_ple_io_test PRIVATE strata_split_ple)
+  target_compile_features(split_ple_io_test PRIVATE cxx_std_17)
+  add_test(NAME split_ple_io_test COMMAND split_ple_io_test)
   list(GET STRATA_SPLIT_CARDS 0 _n0)
   foreach(_tt expert_residency_test batch_plan_test pf_ring_plan_test card_check_test rope_test sfnx_input_test peer_policy_test rccl_policy_test selftest_policy_test)
     add_executable(split_${_tt} ${_sp}/tools/${_tt}.cpp)
@@ -183,6 +198,7 @@ if(STRATA_BUILD_TESTS)
   set(_sp_run_src ${_sp_engine})
   list(REMOVE_ITEM _sp_run_src ${_sp}/tools/sfnx.cpp)
   add_executable(split_fnx_run ${_sp_run_src} ${_sp}/tools/fnx_run.cpp ${_sp_kparts})
+  target_link_libraries(split_fnx_run PRIVATE strata_split_ple)
   set_source_files_properties(${_sp}/tools/fnx_run.cpp PROPERTIES LANGUAGE CUDA)
   target_include_directories(split_fnx_run PRIVATE ${_sp}/src ${_sp}/tools ${STRATA_GGML_DIR}/ggml/src/ggml-cuda ${STRATA_GGML_DIR}/ggml/src
                              ${STRATA_GGML_DIR}/ggml/include)
