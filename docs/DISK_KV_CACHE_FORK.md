@@ -180,3 +180,36 @@ sample per case, no OS page-cache flush, and a separate Split Engine compile run
 performance comparison or a benchmark of an 8 GiB/full-disk cache. Both Ngram disk roots were enabled in the cache-on run;
 this does not isolate or prove a Ngram speedup. Highest sampled GPU temperature was 65 C and MemAvailable stayed above 6.5 GiB.
 The normal configuration uses 64 RAM entries instead of the one-entry test limit. Other backends remain unverified.
+
+## Optional restart persistence (normal engine, Linux)
+
+Add `--conversation-cache-persist` to the disk/RAM arguments above. It is off by default.
+With `ram-first`, lookups still prefer RAM. At completed replies and conversation switches,
+RAM-eligible states are also mirrored to disk, even below the disk token threshold.
+Disk-only spill still follows `--conversation-cache-disk-min-tokens`.
+The RAM mirrors and overflow share the configured disk budget and LRU eviction.
+Mirrors of RAM-resident states are preferred during eviction, but are not pinned indefinitely.
+
+Each GPU session file is streamed and durably flushed before the small index is committed.
+`<cache-dir>/persistent` survives normal shutdown and process crashes. Incomplete groups are
+removed on startup. All GPU payloads are validated before transfer; a failure after transfer
+starts stops the engine. Missing or invalid snapshots are cache misses.
+
+The compatibility key includes model file identity, the executable, GPU layout, resolved
+session settings and relevant execution environment. Replacing a model or binary, or changing
+these settings, discards incompatible snapshots. This deliberately does not promise portability
+between builds or hosts. Only Linux/CUDA has been exercised on hardware.
+
+This is a synchronous snapshot at stable reply/switch boundaries, not a full copy on every token.
+A process crash can lose the current unfinished request. The RAM tier starts empty after restart;
+only successfully committed disk snapshots remain reusable. Reply-end writes add request latency
+and are logged separately; they are not included in the already computed `timings.prompt_ms`.
+Low memory, disk space or save errors may leave some RAM conversations without a durable copy.
+
+Saved tokens and execution state contain conversation data. Use a private dedicated directory.
+Disabling persistence does not delete `persistent`; stop the engine before manually removing it.
+Temporary `run-*` cleanup must not delete `persistent`.
+
+The Linux CPU `conversation_persistent_test` covers two-stage session payloads, MTP layers,
+short-conversation mirrors, clean reopen, committed and partial process crashes, missing stages,
+corrupt indexes, incompatible configurations and capacity/LRU recovery.
