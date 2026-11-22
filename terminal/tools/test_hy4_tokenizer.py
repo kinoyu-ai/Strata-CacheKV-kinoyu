@@ -193,7 +193,9 @@ class RealTemplate(unittest.TestCase):
         self.assertIn(f"{START}tool{MIDDLE}<tool_response:opensource>sunny</tool_response:opensource>{END}", out)
         self.assertIn("reasoning_effort:max", out)
 
-    def test_external_client_effort_is_clamped_to_a_supported_template_mode(self):
+    def test_a_bad_effort_is_a_template_error(self):
+        with self.assertRaises(Exception):
+            self.tpl.template.render(messages=[{"role": "user", "content": "x"}], reasoning_effort="medium")
         out = self.tpl.render([{"role": "user", "content": "x"}], reasoning_effort="medium")
         self.assertIn("reasoning_effort:high", out)
 

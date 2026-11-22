@@ -1,0 +1,242 @@
+{
+  "prompt_tokens": 19218,
+  "version": "0.2.19",
+  "engine": "0.1.65",
+  "disk_test_storage": "temporary NVMe only; production KV remains RAM-only",
+  "passed": true,
+  "cold": {
+    "tokens": [
+      59653,
+      12,
+      37037,
+      5699,
+      12,
+      17,
+      15,
+      17,
+      21,
+      16,
+      16,
+      17,
+      17,
+      248046
+    ],
+    "text": "CACHE-RESTORE-20261122<|im_end|>",
+    "timings": {
+      "generated": 14,
+      "prompt_tokens": 19218,
+      "prompt_ms": 29626.3,
+      "decode_ms": 618.7,
+      "finish": "stop",
+      "drafts_accepted": 9,
+      "drafts_offered": 12,
+      "reused": 0,
+      "hits": 2461,
+      "lookups": 7554,
+      "ram_blobs": 3712,
+      "file_blobs": 138,
+      "file_mb": 356.6,
+      "prompt_read": 19218,
+      "offloaded": 606,
+      "chunk": 8192,
+      "experts_streamed": 50889
+    },
+    "info": {
+      "version": "0.1.65",
+      "engine": "0.1.65",
+      "kv": "k8v4",
+      "context": 262144,
+      "conversation_cache_mib": 4096,
+      "conversation_cache_slots": 64,
+      "prefill_stages": 2,
+      "drafting": "mtp"
+    }
+  },
+  "other": {
+    "tokens": [
+      94817,
+      12,
+      5609,
+      69772,
+      3381,
+      248046
+    ],
+    "text": "SECOND-CONVERSATION<|im_end|>",
+    "timings": {
+      "generated": 6,
+      "prompt_tokens": 21,
+      "prompt_ms": 832.9,
+      "decode_ms": 238.7,
+      "finish": "stop",
+      "drafts_accepted": 3,
+      "drafts_offered": 5,
+      "reused": 0,
+      "hits": 1900,
+      "lookups": 3613,
+      "ram_blobs": 1627,
+      "file_blobs": 40,
+      "file_mb": 93.7,
+      "prompt_read": 21,
+      "offloaded": 227,
+      "chunk": 0,
+      "experts_streamed": 0
+    },
+    "info": {
+      "version": "0.1.65",
+      "engine": "0.1.65",
+      "kv": "k8v4",
+      "context": 262144,
+      "conversation_cache_mib": 4096,
+      "conversation_cache_slots": 64,
+      "prefill_stages": 2,
+      "drafting": "mtp"
+    }
+  },
+  "ram_restore": {
+    "tokens": [
+      59653,
+      12,
+      37037,
+      5699,
+      12,
+      17,
+      15,
+      17,
+      21,
+      16,
+      16,
+      17,
+      17,
+      248046
+    ],
+    "text": "CACHE-RESTORE-20261122<|im_end|>",
+    "timings": {
+      "generated": 14,
+      "prompt_tokens": 19218,
+      "prompt_ms": 715.9,
+      "decode_ms": 451.1,
+      "finish": "stop",
+      "drafts_accepted": 9,
+      "drafts_offered": 12,
+      "reused": 19211,
+      "hits": 3611,
+      "lookups": 7670,
+      "ram_blobs": 3201,
+      "file_blobs": 132,
+      "file_mb": 310.0,
+      "prompt_read": 7,
+      "offloaded": 490,
+      "chunk": 0,
+      "experts_streamed": 0
+    },
+    "info": {
+      "version": "0.1.65",
+      "engine": "0.1.65",
+      "kv": "k8v4",
+      "context": 262144,
+      "conversation_cache_mib": 4096,
+      "conversation_cache_slots": 64,
+      "prefill_stages": 2,
+      "drafting": "mtp"
+    }
+  },
+  "ngram_live": {
+    "a": {
+      "files": 1,
+      "tree_bytes": 10940416
+    },
+    "b": {
+      "files": 1,
+      "tree_bytes": 10870784
+    }
+  },
+  "restart_restore": {
+    "tokens": [
+      59653,
+      12,
+      37037,
+      5699,
+      12,
+      17,
+      15,
+      17,
+      21,
+      16,
+      16,
+      17,
+      17,
+      248046
+    ],
+    "text": "CACHE-RESTORE-20261122<|im_end|>",
+    "timings": {
+      "generated": 14,
+      "prompt_tokens": 19218,
+      "prompt_ms": 1692.3,
+      "decode_ms": 1136.7,
+      "finish": "stop",
+      "drafts_accepted": 9,
+      "drafts_offered": 12,
+      "reused": 19211,
+      "hits": 2461,
+      "lookups": 7554,
+      "ram_blobs": 3712,
+      "file_blobs": 138,
+      "file_mb": 220.6,
+      "prompt_read": 7,
+      "offloaded": 606,
+      "chunk": 0,
+      "experts_streamed": 0
+    },
+    "info": {
+      "version": "0.1.65",
+      "engine": "0.1.65",
+      "kv": "k8v4",
+      "context": 262144,
+      "conversation_cache_mib": 4096,
+      "conversation_cache_slots": 64,
+      "prefill_stages": 2,
+      "drafting": "mtp"
+    }
+  },
+  "max_gpu_c": 52,
+  "method": {
+    "date": "2026-11-22",
+    "upstream_tag": "v0.2.19",
+    "upstream_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
+    "engine": "0.1.65",
+    "model": "Qwen3.8-Flash-Next Unsloth Dynamic v3.1 UD-IQ4_XS",
+    "hardware": "2 x Tesla V100-SXM2-16GB, Linux, CUDA 12.9 / sm_70",
+    "context": 262144,
+    "kv": "k8v4",
+    "layer_split": 24,
+    "mtp": 4,
+    "RAM_cache_MiB": 4096,
+    "RAM_slots": 64,
+    "prompt_cache": 1,
+    "CPU_workers": 15,
+    "PCIe_fraction": 0.2,
+    "spec_min_p": 0.7,
+    "KV_test_disk_MiB": 2048,
+    "KV_test_disk_min_tokens": 0,
+    "KV_test_persist": true,
+    "KV_test_async": true,
+    "KV_test_storage": "temporary NVMe directory",
+    "PLE_cache": "two ext4 Optanes through USB adapters, 12288 MiB per drive",
+    "production_KV_disk_enabled": false,
+    "limits": [
+      "One run per case; no global OS page cache flush.",
+      "API unit tests ran concurrently.",
+      "Prefill uses engine prompt_ms and excludes decode and post-reply capture/write.",
+      "Real Optanes were exercised for PLE; disk KV restore used temporary NVMe, not the unavailable KV Optane.",
+      "No claim of a generation speed improvement versus 0.2.12 or 0.2.18.",
+      "Only Linux CUDA/sm_70 built and tested; no hardware validation on HIP/SYCL/Metal."
+    ]
+  },
+  "tests": {
+    "CPU_cache_tests": 10,
+    "API_tests_run": 2142,
+    "API_tests_skipped": 27,
+    "API_suite_passed": true,
+    "setup_tests_passed": 96
+  }
+}

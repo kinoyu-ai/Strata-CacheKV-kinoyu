@@ -2,7 +2,7 @@
 
 ## What this fork changes
 
-Based on Strata v0.2.18 / engine 0.1.64, this fork parks long outgoing conversations in temporary files when
+Based on Strata v0.2.19 / engine 0.1.65, this fork parks long outgoing conversations in temporary files when
 another conversation takes over. It stores each GPU stage in its own session-format file and registers the
 group only after every stage is written. All files, stage geometry, tokens, images and checkpoints are validated
 before any GPU is overwritten. K/V is read and written in bounded blocks; running state and checkpoints still
