@@ -44,8 +44,8 @@ The README's KV prefill benchmark does not measure this Ngram tier.
 
 ```sh
 g++ -std=c++20 -O2 -pthread -I include \
-  src/ngram/ple_disk_cache_test.cpp src/ngram/ple_reader.cpp \
-  src/platform/direct_file.cpp -o /tmp/ple-disk-cache-test
+  engine/src/ngram/ple_disk_cache_test.cpp engine/src/ngram/ple_reader.cpp \
+  engine/src/platform/direct_file.cpp -o /tmp/ple-disk-cache-test
 /tmp/ple-disk-cache-test
 # Optional: two existing writable roots; only newly created test directories are removed.
 /tmp/ple-disk-cache-test /mnt/cache-a/strata-ngram-cache /mnt/cache-b/strata-ngram-cache

@@ -2,7 +2,7 @@
 
 ## What this fork changes
 
-Based on Strata v0.2.12 / engine 0.1.58, this fork parks long outgoing conversations in temporary files when
+Based on Strata v0.2.18 / engine 0.1.64, this fork parks long outgoing conversations in temporary files when
 another conversation takes over. It stores each GPU stage in its own session-format file and registers the
 group only after every stage is written. All files, stage geometry, tokens, images and checkpoints are validated
 before any GPU is overwritten. K/V is read and written in bounded blocks; running state and checkpoints still
@@ -18,12 +18,12 @@ There is no change to the public SAVE/RESTORE commands; they still reject layer 
 ## Build this source
 
 Install the compilers and CUDA toolkit required by [the source build guide](SOURCE_INSTALL.md).
-After checking out this fork's `disk-conversation-cache` branch, build its engine explicitly:
+After checking out this fork's `main` branch, build its engine explicitly:
 
 ```sh
-cmake -S . -B build-disk-cache -DCMAKE_BUILD_TYPE=Release \
+cmake -S engine -B build-disk-cache -DCMAKE_BUILD_TYPE=Release \
   -DSTRATA_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=native \
-  -DSTRATA_BUILD_CONVERSATION_TESTS=ON
+  -DSTRATA_BUILD_TESTS=ON -DSTRATA_BUILD_CONVERSATION_TESTS=ON
 cmake --build build-disk-cache --target strata -j2
 ```
 
@@ -35,7 +35,7 @@ Upstream treats these older GPUs as community builds; CUDA 13 cannot compile sm_
 Point your existing Strata server configuration's `exe` to the resulting engine. Keep your own model paths,
 tokenizer, GPU layout and authentication. Models, packs, credentials and machine-specific configuration are not
 included. The upstream setup workflow may download an upstream binary unless a source build is explicitly requested;
-see `./setup.sh --build --no-start` in the source guide.
+see `python terminal/setup.py --build --no-start` in the source guide.
 
 ## Enable explicitly
 
@@ -105,7 +105,7 @@ Passed on Linux with two V100 GPUs, CUDA 12.9, sm_70, Qwen3.8-Flash-Next IQ3_S, 
 
 - Nine C++ tests: cache policy, split failures, memory admission, session file I/O, save reclamation,
   disposable disk lifecycle, GPU snapshot byte equality, validation, and transfer failure handling.
-- `python -m unittest serve.test_server`: 359 existing API tests passed.
+- `(cd terminal && python -m unittest serve.test_server)`: 359 existing API tests passed.
 - A 60000/60001 captured-token boundary, bounded capacity/LRU, failed second-stage saves, stale-run cleanup,
   active-engine locking, corrupt files and RAM refusal were checked in unit tests.
 - A file with more than 65 MiB of K/V was read with an admission callback allowing less than 40 MiB of read
@@ -120,7 +120,7 @@ cmake --build build-disk-cache -j2 --target \
   conversation_snapshot_test conversation_validation_test conversation_transfer_test
 ctest --test-dir build-disk-cache --output-on-failure \
   -R '^(conversation_(cache|split_failure|memory|file|disk|snapshot|validation|transfer)_test|session_save_reclaim_test)$'
-python -m unittest serve.test_server
+(cd terminal && python -m unittest serve.test_server)
 ```
 
 GPU tests require available GPU resources. The transfer test is conditional in CMake; use a supported Linux/GNU CUDA
@@ -213,3 +213,43 @@ Temporary `run-*` cleanup must not delete `persistent`.
 The Linux CPU `conversation_persistent_test` covers two-stage session payloads, MTP layers,
 short-conversation mirrors, clean reopen, committed and partial process crashes, missing stages,
 corrupt indexes, incompatible configurations and capacity/LRU recovery.
+
+
+## Optional asynchronous reply snapshots
+
+Set `"env": {"STRATA_DISK_CACHE_ASYNC": "1"}` in the server configuration to enable the
+background writer. It is off by default. The existing disk arguments and optional
+`--conversation-cache-persist` still select the destination, budget and restart behavior.
+The engine captures stable host bytes before reporting the reply complete; the file write
+can overlap the next generation. One transfer is allowed at a time, capped at 4096 MiB.
+A new snapshot is skipped while a write is in flight. The engine thread publishes complete
+groups at a request boundary or while idle. Killing the process before publication can lose
+the unfinished reply snapshot; previously committed matching groups remain reusable.
+
+Version 0.2.18 also has an upstream SSD overflow tier for a single GPU. When this fork's disk
+tier opens successfully, it handles the disk snapshots and the upstream tier stays off.
+Without the fork tier, the upstream behavior is preserved. Restart reuse requires the same
+executable and compatible model/settings; updating the engine invalidates older snapshots.
+
+
+## v0.2.18 validation (2026-11-22)
+
+Built CUDA 12.9 / sm_70 on two V100-SXM2 16GB GPUs, 150W each. Thirteen CPU/cache tests and
+three GPU snapshot variants passed, including the upstream spill and segment-pool tests.
+The server suite initially returned 2093 passed, 26 skipped and 8 failures. Two stale upstream
+test helpers were updated for the current vision API and sampling keyword; the cache-save
+messages were completed for Hebrew and moved out of the monitor-tooltip key namespace.
+A focused rerun covering all eight failures and cache-save monitoring passed: 28 tests.
+The entire suite was not rerun after those corrections.
+
+With Qwen3.8-Flash-Next Unsloth Dynamic v3.1 UD-IQ4_XS, 262144 context, k8v4, MTP,
+layer split 24 and parallel 1, the disabled-cache, cold-cache, RAM restore and restart restore
+answers matched token for token. The prompt had 19218 tokens; 19211 were reused after restart.
+Prompt processing took 29.80s cold, 0.47s from RAM and 1.42s after restart. Each ran once;
+these are functional checks, not throughput averages. KV snapshots used a temporary folder on
+the system NVMe SSD because the Optane devices failed I/O. PLE fell back to source reads;
+no real Optane performance result is claimed for this release.
+
+[Machine-readable results](validation/2026-11-22-v100-0.2.18-kv.json).
+Windows, HIP, SYCL, Metal, physical power-loss recovery, full 262K input and durability under
+long-running workloads were not tested in this update.

@@ -1,0 +1,47 @@
+{
+  "date": "2026-11-22",
+  "upstream": "v0.2.18",
+  "engine": "0.1.64",
+  "hardware": "2 x Tesla V100-SXM2-16GB, CUDA 12.9, sm_70, 150W each",
+  "model": "Qwen3.8-Flash-Next Unsloth Dynamic v3.1 UD-IQ4_XS",
+  "context": 262144,
+  "kv": "k8v4",
+  "layer_split": 24,
+  "parallel": 1,
+  "purpose": "Functional validation. Each case ran once; these are not throughput averages.",
+  "storage": "Temporary cache on the system NVMe SSD; Optane I/O failed and was not used for KV validation. PLE cache fell back to source reads.",
+  "prompt_tokens": 19218,
+  "answer_tokens_equal": true,
+  "cases": {
+    "disabled": {
+      "prompt_ms": 30061.3,
+      "reused": 0,
+      "generated": 14,
+      "answer": "CACHE-RESTORE-20261122<|im_end|>"
+    },
+    "cold": {
+      "prompt_ms": 29795.4,
+      "reused": 0,
+      "generated": 14,
+      "answer": "CACHE-RESTORE-20261122<|im_end|>"
+    },
+    "other": {
+      "prompt_ms": 760.6,
+      "reused": 0,
+      "generated": 6,
+      "answer": "SECOND-CONVERSATION<|im_end|>"
+    },
+    "ram_restore": {
+      "prompt_ms": 473.2,
+      "reused": 19211,
+      "generated": 14,
+      "answer": "CACHE-RESTORE-20261122<|im_end|>"
+    },
+    "restart_restore": {
+      "prompt_ms": 1416.6,
+      "reused": 19211,
+      "generated": 14,
+      "answer": "CACHE-RESTORE-20261122<|im_end|>"
+    }
+  }
+}

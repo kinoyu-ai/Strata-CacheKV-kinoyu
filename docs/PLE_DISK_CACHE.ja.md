@@ -62,8 +62,8 @@ Ngramテーブルから読んだ4 KiBページを、指定したディスクに�
 
 ```sh
 g++ -std=c++20 -O2 -pthread -I include \
-  src/ngram/ple_disk_cache_test.cpp src/ngram/ple_reader.cpp \
-  src/platform/direct_file.cpp -o /tmp/ple-disk-cache-test
+  engine/src/ngram/ple_disk_cache_test.cpp engine/src/ngram/ple_reader.cpp \
+  engine/src/platform/direct_file.cpp -o /tmp/ple-disk-cache-test
 /tmp/ple-disk-cache-test
 ```
 
