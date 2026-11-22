@@ -164,7 +164,8 @@ int main() {
     check(session_file_write(good.string(), original, id, written, error), "write succeeds");
     check(error.empty(), "write leaves no error");
 
-    // Bounded disk reads keep payloads in their original open file, validated before GPU transfer.
+#if defined(__linux__)
+    // Linux-only bounded disk reads keep payloads in their original open file, validated before GPU transfer.
     {
         SessionReadLimits limits; limits.stream_kv = true;
         size_t largest_admission = 0;
@@ -208,6 +209,7 @@ int main() {
         fs::remove(path);
         check(back.kv[0].k.read(part.data(), 123, part.size()), "open file backing survives unlink");
     }
+#endif
     // golden: format v1 is frozen. The fixed sample must give these exact bytes (little-endian header fields at
     // fixed offsets, and a fixed hash of the whole file); a format change must bump the version and this test.
     {
