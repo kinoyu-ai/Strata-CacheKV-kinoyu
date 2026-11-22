@@ -10,7 +10,7 @@ debugging and are kept in `terminal/data/settings-register.json`.
 A number or a word is set like any environment variable, for example `STRATA_KVA=1`. In the Terminal, `strata launch --set NAME=value`
 puts it in the model's run configuration.
 
-## Switches you can turn on (271)
+## Switches you can turn on (272)
 
 Off unless you set them. The last column says where each one is described.
 
@@ -47,6 +47,7 @@ Off unless you set them. The last column says where each one is described.
 | `STRATA_DENSE_MMQ` | on / off | NVIDIA and AMD, Intel Arc | [AMD_HIP.md](AMD_HIP.md), [DETAILS.md](DETAILS.md), [prefill-ab.md](bench-results/2026-10-05-community-gfx1151/prefill-ab.md) |
 | `STRATA_DEQUANT_SIDE` | on / off | NVIDIA and AMD | [DETAILS.md](DETAILS.md) |
 | `STRATA_DISJOINT_ADAPT` | number | NVIDIA and AMD, Intel Arc | [DISJOINT_EXPERT_CACHE.md](DISJOINT_EXPERT_CACHE.md), [README.md](bench-results/2026-10-09-community-rtx-5080-4060ti-0.1.41/README.md) |
+| `STRATA_DISK_CACHE_ASYNC` | on / off | NVIDIA and AMD | [DISK_KV_CACHE_FORK.ja.md](DISK_KV_CACHE_FORK.ja.md), [DISK_KV_CACHE_FORK.md](DISK_KV_CACHE_FORK.md) |
 | `STRATA_DMA_BATCH` | number | NVIDIA and AMD | [BATCHED_DMA.md](BATCHED_DMA.md), [DETAILS.md](DETAILS.md) |
 | `STRATA_DOWN_WS` | on / off | NVIDIA and AMD | [OLDER_GPUS.md](OLDER_GPUS.md), [release-notes-0.2.7.md](release-notes-0.2.7.md) |
 | `STRATA_DUMP_FIRST_LOGITS` | on / off | NVIDIA and AMD, Intel Arc | [DGX_SPARK_LINUX.md](DGX_SPARK_LINUX.md) |

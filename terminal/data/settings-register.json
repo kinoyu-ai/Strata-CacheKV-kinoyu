@@ -6567,6 +6567,42 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_DISK_CACHE_ASYNC",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 13606,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": "0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DISK_KV_CACHE_FORK.ja.md:144",
+    "docs/DISK_KV_CACHE_FORK.md:220"
+   ],
+   "status": "opt-in",
+   "owner": "core",
+   "note": "[reviewed] Fork-only bounded background disk KV snapshots. Linux sequential serving; off unless set to 1. CUDA validated; other backends untested.",
+   "retire_after": "",
+   "retired_in": "",
+   "first_commit": "732d397d1",
+   "first_date": "2026-11-22",
+   "last_commit": "732d397d1",
+   "last_date": "2026-11-22",
+   "since": ""
+  },
+  {
    "name": "STRATA_DISPATCH_REPORT",
    "backends": [
     "cuda-hip"
