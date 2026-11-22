@@ -349,8 +349,10 @@ PleReader::~PleReader() {
 }
 
 bool PleReader::open(const std::string& path, uint64_t table_offset, uint64_t n_rows, uint32_t max_inflight,
-                     uint64_t cache_rows, std::string& err, bool io_thread, uint32_t row_bytes) {
+                     uint64_t cache_rows, std::string& err, bool io_thread, uint32_t row_bytes,
+                     const std::vector<PleDiskLocation>& disk_cache) {
     close();
+    if (!disk_cache.empty()) { err = "PleReader: the disk cache is not supported by the SYCL reader"; return false; }
     if (max_inflight == 0 || max_inflight > 1024) { err = "PleReader: max_inflight must be 1..1024"; return false; }
     if (row_bytes == 0 || row_bytes > PAGE) { err = "PleReader: row_bytes must be 1..4096"; return false; }
     if (!impl_->file.open(path, err)) return false;
@@ -432,6 +434,9 @@ void PleReader::close() {
 }
 
 bool PleReader::is_open() const { return impl_->file.is_open(); }
+// This backend uses the source file and RAM row cache; it has no disk-cache worker to drain.
+void PleReader::flush_disk_cache() {}
+
 uint32_t PleReader::row_bytes() const { return impl_->row_bytes; }
 
 PleReader::Ticket PleReader::issue(const uint32_t* rows, size_t n, uint8_t* out_raw) {
