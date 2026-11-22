@@ -253,3 +253,26 @@ no real Optane performance result is claimed for this release.
 [Machine-readable results](validation/2026-11-22-v100-0.2.18-kv.json).
 Windows, HIP, SYCL, Metal, physical power-loss recovery, full 262K input and durability under
 long-running workloads were not tested in this update.
+
+
+### Hardware calibration (2026-11-22)
+
+The standard tuner ran for 2087 seconds on the same two V100s, with a dual Xeon E5-2690 v3,
+Unsloth Dynamic v3.1 UD-IQ4_XS, 262144 context, k8v4, MTP and layer split 24. The Optane tiers
+were disabled after I/O errors; the 4096 MiB RAM KV cache and 1048576-row PLE cache stayed on.
+
+The final measured rate was 41.3 tok/s. CPU worker rates were 40.3 (22), 38.4 (15), 29.4 (11)
+and 27.7 (6). The expert-tier rates were 41.3 (default), 32.0 (every 1 / 80 swaps / 0.97 decay)
+and 32.7 (every 1 / 160 / 0.97). The worker sweep used up to 128 generated tokens; the tier
+sweep used up to 512. Every rate is a median over the tuner's three synthetic prompts, not
+an aggregate parallel-serving rate.
+
+No override passed the tuner's >3% acceptance rule over native defaults. Serving now uses
+22 workers, spec-min-p 0.5, the automatic PCIe rule, default prompt splitting and default
+expert-tier updates. This replaces the prior local 15-worker / 0.2 PCIe / 0.7 draft-floor
+configuration. It is a hardware tuning result, not a measured overall speedup over that
+prior configuration. The final server returned the requested API check marker successfully.
+
+[Raw samples, method and corpus fingerprints](validation/2026-11-22-v100-0.2.18-calibration.json).
+The Linux server CI also completed with 2101 passed, 26 skipped and no failures on commit
+`732d397d1`; later changes to that server were not needed.

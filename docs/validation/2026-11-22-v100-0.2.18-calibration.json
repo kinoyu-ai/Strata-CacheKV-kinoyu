@@ -1,0 +1,195 @@
+{
+  "date": "2026-11-22",
+  "upstream": "v0.2.18",
+  "engine": "0.1.64",
+  "method": {
+    "engine_sha256": "364ef8a7699e3f66ca71a4ba98c629520c9490653e93eb1c9edeb6def9e5606b",
+    "calibrator_sha256": "0ad6941c43846a594f4868afceb71459f04308923a11b01e3a690729d910ca89",
+    "prefill_docs_sha256": "7e691f94275cb8b9ce20b2630849be52694558ce08270ebe3e789f9ff173df55",
+    "prefill_docs_files": 86,
+    "expert_profile_sha256": "9746a52a7ef77d888e5a4ea256f9efa3000478a4f1c216f2c78dfd5a08251836",
+    "decode_prompts": "tools/calibrate.py PROMPTS",
+    "decode_max_new": 128,
+    "expert_tier_max_new": 512,
+    "rounds": 3,
+    "minimum_gain": 0.03,
+    "temperature": 0,
+    "disk_tiers_during_measurement": "disabled due to Optane I/O errors",
+    "ram_cache_mib": 4096,
+    "ple_row_cache": 1048576,
+    "context": 262144,
+    "kv": "k8v4",
+    "layer_split": 24,
+    "gpu_power_limit_w": 150,
+    "gpus": "2 x Tesla V100-SXM2-16GB",
+    "cpu": "2 x Intel Xeon E5-2690 v3",
+    "model": "Qwen3.8-Flash-Next Unsloth Dynamic v3.1 UD-IQ4_XS",
+    "parallel": 1
+  },
+  "result": {
+    "settings": {},
+    "env": {},
+    "report": {
+      "pipe_sweep": {
+        "0": [
+          398.3721263422019
+        ],
+        "1": [
+          412.91234041186885
+        ],
+        "768": [
+          316.89414170909686
+        ],
+        "1536": [
+          413.0585765155986
+        ],
+        "3072": [
+          410.69482859777054
+        ],
+        "6144": [
+          408.179456157401
+        ]
+      },
+      "pipe_confirm": {
+        "0": [
+          461.85541097950147,
+          460.37384682838655,
+          465.0216919739696
+        ],
+        "1536": [
+          414.1111701357029,
+          414.54325712559165,
+          415.40678780343063
+        ]
+      },
+      "default": {
+        "pcie_frac": 0.1,
+        "spec_min_p": 0.5,
+        "pool_workers": 22
+      },
+      "pcie_sweep": {
+        "0.0": [
+          42.39954950478651,
+          43.03388918773534,
+          43.28272410644845
+        ],
+        "0.1": [
+          41.99199527590053,
+          42.13020867618985,
+          43.64281086978758
+        ],
+        "0.2": [
+          43.14412835378185,
+          40.90110241252596,
+          42.29587284803225
+        ],
+        "0.35": [
+          39.48789140829863,
+          37.32975589839307,
+          38.74912965822057
+        ],
+        "0.55": [
+          34.342133505044,
+          34.85269291510102,
+          33.189856350152986
+        ],
+        "0.75": [
+          30.83742892936301,
+          29.37194520296473,
+          29.123341903483425
+        ],
+        "0.9": [
+          31.528646731366077,
+          28.527491140876776,
+          29.552328400249344
+        ],
+        "1.0": [
+          25.691977278657593,
+          26.506523089666597,
+          27.090520434294906
+        ]
+      },
+      "min_p_sweep": {
+        "0.3": [
+          41.89852700490998,
+          40.08392571947515,
+          41.13903708941312
+        ],
+        "0.5": [
+          42.88681900422167,
+          43.80411348003148,
+          39.83815748521631
+        ],
+        "0.7": [
+          42.898317581607344,
+          42.8351515962787,
+          42.75217100868403
+        ]
+      },
+      "confirm": {
+        "0.1/0.5": [
+          40.59368260814411,
+          42.70937604270938,
+          44.65375893947323
+        ],
+        "0.0/0.5": [
+          42.19270198107922,
+          43.74572795625427,
+          43.921353326699375
+        ]
+      },
+      "workers": {
+        "22": [
+          40.13923296434507,
+          40.557667934093786
+        ],
+        "15": [
+          37.959667852906286,
+          38.800812392009455
+        ],
+        "11": [
+          27.921383853587244,
+          30.841144013685753
+        ],
+        "6": [
+          26.001990777418897,
+          29.304029304029303
+        ]
+      },
+      "adapt": {
+        "default": [
+          40.35817883717998,
+          42.195136021625004
+        ],
+        "1/80/0.97": [
+          31.520833592380285,
+          32.556765642658995
+        ],
+        "1/160/0.97": [
+          32.72910372608258,
+          32.68331990330379
+        ]
+      },
+      "seconds": 2087,
+      "tok_s": 41.3
+    }
+  },
+  "applied": {
+    "pcie_frac": "engine automatic rule",
+    "spec_min_p": 0.5,
+    "pool_workers": 22,
+    "prefill_pipe": 0,
+    "expert_tier": "engine defaults"
+  },
+  "prior_local_settings": {
+    "pcie_frac": 0.2,
+    "spec_min_p": 0.7,
+    "pool_workers": 15
+  },
+  "notes": [
+    "The tuner found no override that passed its >3% improvement rule over native defaults. The prior local overrides were replaced by the measured native settings.",
+    "The final 41.3 tok/s is the median of two measurements; each measurement is the median of three synthetic prompts with up to 512 generated tokens. This is not a before/after speedup claim.",
+    "Disk KV and PLE tiers were disabled for calibration because the Optane devices failed I/O. RAM KV and PLE row caches remained enabled.",
+    "A private routing-frequency profile was retained; its fingerprint and the exact prefill-document corpus fingerprint are in method. Results depend on this machine, model and workload."
+  ]
+}
